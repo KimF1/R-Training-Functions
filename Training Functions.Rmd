@@ -1,0 +1,342 @@
+---
+title: "Training Functions"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
+# Exercises R for Data Science - Wickham
+## Exercises 19.2.1
+### 1. Why is TRUE not a parameter to rescale01()? What would happen if x contained a single missing value, and na.rm was FALSE?
+```{r}
+rescale01 <- function(x) {
+  rng <- range(x, na.rm = TRUE, finite = TRUE) # na.rm = T excludes missing values
+  (x - rng[1]) / (rng[2] - rng[1])
+}
+x <- c(5, 10, NA)
+rescale01(x)
+```
+```{r}
+rescale01.f <- function(x) {
+  rng <- range(x, na.rm = FALSE, finite = TRUE) # na.rm = T excludes missing values
+  (x - rng[1]) / (rng[2] - rng[1])
+}
+x <- c(5, 10, NA)
+rescale01.f(x)
+```
+* with na.rm False output is identical, i.e. containes one missing value 
+```{r}
+rescale01.fi <- function(x) {
+  rng <- range(x, na.rm = FALSE) # na.rm = T excludes missing values
+  (x - rng[1]) / (rng[2] - rng[1])
+}
+x <- c(5, 10, NA)
+rescale01.fi(x)
+```
+* answer: rng (intermediate function) cannot be calculated with missing values and na.rm = F
+* however, finite = T, omits all non-finite elements; NA is treaded as non-finite 
+
+### 2. In the rescale01(), infinite values are left unchanged (/not considered). Rewrite rescale01() so that -Inf is mapped to 0, and Inf is mapped to 1.
+```{r}
+y <- c(Inf, 0, 5)
+rescale01.fi <- function(y) {
+  y <- ifelse(y == Inf, 1, y)
+  y <- ifelse(y == -Inf, 0, y)
+  rng <- range(y, na.rm = FALSE) # na.rm = T eycludes missing values
+  (y - rng[1]) / (rng[2] - rng[1])
+}
+rescale01.fi(y)
+```
+**Alternative solution**
+```{r}
+rescale01.fi <- function(y) {
+  y[y == Inf] <- 1
+  y[y == -Inf] <- 0
+  rng <- range(y, na.rm = FALSE) # na.rm = T eycludes missing values
+  (y - rng[1]) / (rng[2] - rng[1])
+}
+rescale01.fi(y)
+```
+### 3. Practice turning the following code snippets into functions. Think about what each function does. What would you call it? How many arguments does it need? Can you rewrite it to be more expressive or less duplicative?
+```{r}
+mean(is.na(x)) #[1]
+
+x / sum(x, na.rm = TRUE) #[2]
+
+sd(x, na.rm = TRUE) / mean(x, na.rm = TRUE) #[3]
+```
+
+```{r}
+# [1]: provides proportion of missing values in x
+prop_na <-function (x) {
+  mean(is.na(x))
+}
+prop_na(x)
+```
+```{r}
+# [2]
+# calculates relative proportion of each value in x, excluding missing values 
+# applied to a vector, this will normalize
+x <- c(1,3,NA)
+normalize <-  function(x, na.rm = F) {
+  x/sum(x, na.rm = na.rm)
+}
+normalize(x)
+# by including na.rm as input, we can decide how NAs are handled: 
+# when na.rm = F NAs do not get dropped, hence, we get all NAs and thereby, a notifcation that there are NAs still in the dataset
+# when na.rm = T NAs do get dropped, and vector excl. NAs will be get standardized
+```
+```{r}
+# [3]
+# sd(x, na.rm = TRUE) / mean(x, na.rm = TRUE) 
+# sogenannter Variationskoeffizient: sd/mean
+# im Vergleich zur Standardabweichung unabh. von der Maßeinheit; 
+vc <- function(x, na.rm = T) {
+  sd(x, na.rm = na.rm) / mean(x, na.rm = na.rm) 
+}
+```
+### 4. Write your own functions to compute variance and skewness
+```{r}
+# Variance:
+x <- c(1,2,NA)
+variance <- function(x, na.rm =F) {
+  mean <- sum(x, na.rm = na.rm)/length(x[is.na(x)==F])
+  sq_dev <- (x-mean)^2
+  sum(sq_dev,na.rm = na.rm)/(length(x[is.na(x)==F])-1)
+}
+variance(x)
+```
+![Schätzer Schiefe](D:/Studies/Postgraduate Studies/Sem 1-R&SQL_for_Business_Analytics/3.Zusammenfassungen_&_Guidelines/Ch._19_Functions/1.Schiefe-erwartungstreu.png)
+
+```{r}
+# Skewness
+skewness <-  function(x, na.rm = T) {
+  n <- length(x[is.na(x)==F])
+  mean <- sum(x, na.rm = na.rm)/n
+  skewness <- ((x-mean)/sqrt(variance))^3
+  n/((n-1)*(n-2))*sum(skewness,na.rm = na.rm)
+}
+```
+
+### 5. Write both_na(), a function that takes two vectors of the same length and returns the number of positions that have an NA in both vectors
+```{r}
+a <- c(NA, 1,NA,3)
+b <- c(NA, 4,NA, 5)
+
+both_na <- function(a,b){
+  sum(is.na(a) & is.na(b))
+      }
+both_na(a,b)
+```
+### 6. What do the following functions do? Why are they useful even though they are so short?
+```{r}
+is_directory <- function(x) file.info(x)$isdir
+# file.info returns information about files on a provided path (x)
+# isdir returns whethere the dest is a directory or file
+
+is_readable <- function(x) file.access(x, 4) == 0
+# file.access returns information about accessibility of a dest of a path (x)
+# '4' is a hyperparameter named mode; mode = 4 tests for read permission
+# file.access outputs integer vector w/ value 0 for succes and -1 for failure
+# thus, the function tests whether a user has read permission on a file
+is_readable('D:/Studies/Postgraduate Studies/Sem 1-R&SQL_for_Business_Analytics/3.Zusammenfassungen_&_Guidelines/Ch._19_Functions/1.Schiefe-erwartungstreu.png')
+```
+
+### 7. Read the complete lyrics to “Little Bunny Foo Foo”. There’s a lot of duplication in this song. Extend the initial piping example to recreate the complete song, and use functions to reduce the duplication.
+```{r}
+# Check morgen
+
+```
+## Exercises 19.3.1
+### 1. Read the source code for each of the following three functions, puzzle out what they do, and then brainstorm better names
+```{r}
+f1 <- function(string, prefix) {
+  substr(string, 1, nchar(prefix)) == prefix
+} 
+# this function controls whether a string (or a number of strings) contains a certain prefix
+# better name: control_prefix
+
+f2 <- function(x) {
+  if (length(x) <= 1) return(NULL)
+  x[-length(x)]
+}
+# drops the last value (indexed using length ()) in a vector
+# better name: drop_last
+
+f3 <- function(x, y) {
+  rep(y, length.out = length(x))
+}
+# replicate the values in y, so that both vectors x and y have equal length
+# better name: expand_length
+```
+### 2. Take a function that you’ve written recently and spend 5 minutes brainstorming a better name for it and its arguments.
+```{r}
+morgen
+```
+### 3. Compare and contrast rnorm() and MASS::mvrnorm(). How could you make them more consistent?
+```{r}
+?rnorm # generates a randomly drawn sample vector of normally distributed numbers 
+?mvrnorm() # Produces one or more samples from the specified multivariate normal distribution.
+# one could align the hyperparameter names (in rnorm it is mean and sd, in mvrnorm it is mu and sigma)
+```
+### 4. Make a case for why norm_r(), norm_d() etc would be better than rnorm(), dnorm(). Make a case for the opposite.
+```{r}
+# it is easier to understand what norm_r is actually doing: we look at normal distribution and take a random sample; that it is a normal distribution is the most important thing to understand first
+```
+
+## Exercises 19.4.4
+### 1. What’s the difference between if and ifelse() ? Carefully read the help and construct three examples that illustrate the key differences.
+```{r}
+?ifelse
+?`if`
+```
+### 2. Write a greeting function that says “good morning”, “good afternoon”, or “goodevening”, depending on the time of day. (Hint: use a time argument that defaults to lubridate::now() . That will make it easier to test your function.)
+```{r}
+library(lubridate)
+# ?now() # gives current time "2020-01-27 18:09:18 CET"
+
+greeting <- function(now) {
+  if (hour(now) >= 24 && hour(now) < 12) {
+    print('Good Morning')
+  } else if (hour(now) >= 12 && hour(now) < 18) {
+    print('Good Afternoon') 
+  } else {
+    print('Good Evening')
+  }
+}
+greeting(now())
+```
+### 3. Implement a fizzbuzz function. It takes a single number as input. If the number is divisible by three, it returns “fizz”. If it’s divisible by five it returns “buzz”. If it’s divisible by three and five, it returns “fizzbuzz”. Otherwise, it returns the number. Make sure you first write working code before you create the function.
+```{r}
+fizzbuzz <- function(x) {
+  if(x/3 == floor(x/3) & x/5 != floor(x/5)) { # divisible by 3, but not 5
+    print('fizz')
+  } else if(x/5 == floor(x/5) & x/3 != floor(x/3)) { # divisible by 5 but not 3
+    print('buzz')
+  } else if (x/3 == floor(x/3) && x/5 == floor(x/5)) { # divisible by 5 and 3 
+    print('fizzbuzz')
+  } else { # divisible by neither 5 nor 3
+    x
+  }
+}
+fizzbuzz(13)
+fizzbuzz(25)
+fizzbuzz(30)
+fizzbuzz(12)
+fizzbuzz(122)
+fizzbuzz(102)
+```
+```{r}
+# alternativ fizzbuzz with modular operator
+fizzbuzz_vector <- function(x) {
+  if(x%%3 == 0 && x%%5 !=0) {
+    print('fizz')
+  } else if(x%%5 == 0 && x%%3 != 0) {
+    print('buzz') 
+  } else if (x%%5 == 0 && x%%3 == 0) {
+    print('fizzbuzz')
+  } else {
+    x
+  }
+}
+
+```
+#### Save code by adjusting the order of if-else statements
+```{r}
+fizzbuzz <- function(x, buzz= 5, fizz = 3) {
+  if(x%%buzz == 0 && x%%fizz == 0) {
+    print('fizzbuzz')
+  } else if(x%%buzz == 0) {
+    print('buzz') 
+  } else if (x%%fizz == 0) {
+    print('fizz')
+  } else {
+    x
+  }
+}
+fizzbuzz(15)
+```
+### Switch function
+* useful to collect different functions within one
+* it is an alternative to handle multiple if-else statements in a more compact way 
+```{r}
+algb <- function(x,y,op){
+  switch(op, 
+         plus = y+x,
+         minus = x-y)
+}
+algb(x=c(3,4), y=c(2,1), op='plus')
+
+# What does this switch() call do? What happens if x is “e”?
+switch(x,
+a = ,
+b = "ab",
+c = ,
+d = "cd"
+)
+
+
+switch('e',
+a = ,
+b = "ab",
+c = ,
+d = "cd"
+)
+# does not return any value 
+```
+
+### Stop argument
+```{r}
+wt_mean <- function(x, w, na.rm = FALSE) { # reason for stop-argument: length of input data and weights vector should be equal
+  if (length(x) != length(w)) {
+    stop("'x and w must be the same length'", call.=TRUE) # call determines whether call should become part of the error message; if TRUE, the call (e.g. wt_meain(1:3, 4:7) will be part of error message
+  } 
+  if (na.rm) { # if there is an na.rm argument provided
+    miss <- is.na(x) | is.na(w)
+    x <- x[!miss] # when there is a missing in one vector, value at respective position should be excluded in both; therefore, non-vector-specific argument 'miss' is sufficient
+    w <- w[!miss]
+  }
+  sum(w * x)/sum(w)
+}
+
+wt_mean(c(1,2,3, NA, 5, 7), c(NA,3,4,4, 6, 8)) # yields NA (default of na.rm = F)
+wt_mean(c(1,2,3, NA, 5, 7), c(NA,3,4,4, 6, 8), na.rm = T) # yields wt mean
+```
+
+```{r}
+x <- c(1,2,NA)
+test <- function(x, na.rm = FALSE) {
+  if(na.rm) { #if False equals to false; so expression will not be executed
+    miss <- is.na(x)
+    x <- x[!miss]
+  } 
+  print(x)
+}
+test(x, na.rm = T)
+```
+
+
+
+# To DO 
+* finish the chapter DONE
+* Github wieder aufnehmen und einrichten; insbesondere Kaggle competition einrichten
+* go over my solutions with solutions online (DO)
+* go over lecture script and add to Ch 19 summary script and notes if necessary (DO)
+* read through notes (FR)
+* do additional tasks from lecture (FR)
+* read through base R stuff again (FR)
+* write functions for master thesis script (DO)
+* do a simple for loop again (DO)
+* start with Ren and apply function family (FR)
+* start with Kaggle challenge
+
+
+
