@@ -2,16 +2,408 @@
 title: "Training Functions"
 output: html_notebook
 ---
+# Libraries
+```{r}
+library(tidyverse)
+```
+# Learnings
+* for default values within function arguments, think about whether they have to occur within one function in function body anyway (see Exercises 19.2.1, 1.)
+* don't forget that all simple arithmetic operators are vectorized in R
+* don't forget to save ifelse/if-else/if_else results in a new vector (see Wdh 27.03.)
+* syntax of if-else statements in function: 
+function(x) {
+  if() }
+  do sth. {
+  else ()
+  } do sth. else
+}
 
-This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+* we can use regex when using strings as function argument: 
+  + e.g. function(<..>, path =".") (a regular expression, the dot ( . ) will match any character except a newline); see section 'Download file if it does not exist' 
+* the last calculation must always be a real calculation and not an assignment; otherwise, the function does not have anything to perform
+* don't forget to think about the order within function body: 
+  + order arguments in a way that process time is reduced
 
-Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
 
-Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+# Theoretical remarks 
+* **Functions** reduce duplication by identifying repeated patterns of code and extract them 
+out into independent pieces that can be easily reused and updated
 
-When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+## T Lazy Evaluation
+* **in a function call, the expression of an argument is evaluated only, when the value of the argument is needed for the function to provide a result**
+* Exp.1:
+```{r}
+e1 <- function(x,y) {
+  if(x>0) x else y
+}
+# function does not evaluate y as it does not need y: 
+e1(1)
+# function does evaluate y as it does need y:
+e1(-1) 
+# to make it more explicit w/ explicit error statement provided as y:
+e1(-1, stop('Stop now'))
+# Error in e1(-1, stop("Stop now")) : Stop now
+# R evaluates y, but cannot process y
+# -> proof that R does evaluate y when necessary
+```
+* Exp. 2: Default values (more precisely: default expressions)
+* note: more precisely it should be called default expressions, bcs the value is not available until the expression is evaluated
+```{r}
+# lets give y a default value that calls stop
+e2 <- function(x, y = stop('Stop now')) { 
+  if(x>0) x else y
+}
+# if lazy evaluation does not apply here, i.e. y is evaluated irrespective, we should get an error message here, when we apply e2 without supplying y 
+# if lazy evaluation applies, calling e2 w> a positive value for x, should not cause an error since y is never evaluated
+e2(1) # no error
+e2(-1) # error 'Stop now' -> stop function (y) as default value gets called
+e2(-1, 2) # result: 2
+e2(-1, stop('y is missing')) # result: 'y is missing' --> overwriting of default is possible
 
-The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+```
+## good practice w/ respect to lazy evaluation 
+* avoid using undefined arguments in the body of the function, i.e. outside the function arguments
+* thereby, the behavior of a function can get quite unpredictable and function gets hard to debug
+
+## about overriding default behavior (!)
+* **one can always override a default value of a function**
+* Exp.: 
+```{r}
+e3 <- function(x, n = floor(length(x)/2)) {
+  x[1:n]
+}
+e3(c(1:3)) # result: 1
+e3(c(1:5), n = 4) #result: 1,2,3,4
+```
+
+## T displaying argument list of existing function: args()
+```{r}
+args(apply)
+```
+
+## T if-else vs. ifelse vs. dplyr::if_else
+### T if-else syntax: if(cond) cons.expr else alt.expr
+  + cond: **length-one logical vector that is not NA**
+  + cond of length > 1 are currently accepted with a warning, but only the first element is used 
+  + with multiple if-conditions R tests for each condition in the order provided 
+  
+### T ifelse snytax: ifelse(test,yes,no)
+  + test: **an object (vector, list, df etc.) which can be coerced to logical mode (i.e. with logical cond.)**
+  + yes: return values (i.e. can be list/vector of same length and type as 'test') for true elements of test
+  + no: return values (i.e. can be list/vector of same length and type as 'test') for false elements of test
+  + if yes or no are too short, their **elements are recycled**
+  + yes will be evaluated if and only if any element of test is true, and analogously for no  
+  + **result**: an object of the same length and attributes (including dimensions and "class") as 'test' and data values from the values of yes or no
+  
+* **note: <if(test) yes else no> is much more efficient and often much preferable to ifelse(test, yes, no) whenever test is a simple true/false result, i.e., when length(test) == 1**
+
+```{r}
+df <- data.frame(c(1,NA), c(2,2))
+
+ifelse(is.na(df), 'yes', 'no') # returns matrix with character strings
+if(is.na(df)) 'yes' else 'no' # returns: Bedingung hat Länge > 1 und nur das erste Element wird benutzt[1] "no"
+
+v <- c(1,NA,2)
+m <- ifelse(is.na(v), 'missing value', 'no') # returns character vector
+m # "no" "missing value" "no"  
+if(is.na(v)) 'yes' else 'no' # Bedingung hat L�nge > 1 und nur das erste Element wird benutzt[1] "no"
+```
+
+### T dyplr::if_else syntax: if_else(condition, true, false, missing = NULL)
+  + condition: **logical vector of length one OR GREATER**
+  + missing: if not NULL, will be used to replace missing values
+  + compared to the base ifelse(), this function is more strict: it checks that true and false are the same type
+  + dplyr suggests, that this strictness makes the output type more predictable, and makes it somewhat faster
+
+### T system.time: ifelse > if-else > if_else > verbose solution
+* **note: for those instances, where if_else can replace base R ifelse, the former is much faster**
+* **if_else > if-else > ifelse**
+* **however, all of those solutions are often much less effective, than a more verbose solution**
+
+```{r}
+# source for example: https://csgillespie.github.io/efficientR/performance.html#top-5-tips-for-efficient-performance
+marks <- round(rnorm(n = 10e6, mean = 50, sd = 10), 0)
+marks
+## verbose solution: 
+system.time({
+  result2 <- rep('failed', times = length(marks)) 
+  result2[marks>=50] <- 'passed'
+})# 0.16
+
+## if_else:
+system.time({ 
+  result3 <- dplyr::if_else(marks >=50, 'passed', 'failed')
+}) # verstrichen: 0.58
+
+# implement the following: if marks > 50, print 'pass', else print 'fail'
+## ifelse:
+system.time({ 
+  result1 <- ifelse(marks >= 50, 'passed', 'failed')
+  }) # verstrichen:  3.47 
+```
+## T if-statement and logical operations
+* overall, one should avoid using vectorized operators 
+
+### T && and II
+* if one wants to combine multiple **logical expressions in if-statement**, one **CANNOT** use the same expressions as in filter(), e.g. **| or &**
+  + remember that these are vectorized logical operators, whereas II and && only assess the first element of an object 
+* one can use II and && to combine multiple logical expressions in the if-statement
+* if-statement will produce error, if it yields vector output; only the first element of that output-vector would be used
+
+### T any() and all() and == 
+* we can use the logical functions any() and all() in conjunction with == to  collapse logical vector into one Boolean variable
+* both functions only return a single TRUE/FALSE
+* any: T if any of the values within (logical) vector yield T
+* all: T If all of the values within (logical) vector yield T
+* syntax: any/all(..., **na.rm = FALSE**)
+
+
+### T == vs. identical()
+* identical is not vectorized, i.e. it always returns either a single TRUE or FALSE
+* syntax: identical(x, y, num.eq = TRUE, single.NA = TRUE, attrib.as.set = TRUE,
+          ignore.bytecode = TRUE, ignore.environment = FALSE,
+          ignore.srcref = TRUE)
+  + x,y: any R objects
+  
+```{r}
+x <- c(1,2,3)
+y <- c(1,2,5)
+y==x #TRUE  TRUE FALSE
+identical(x,y)#False
+```
+### T == vs. dplyr:: near() 
+* This is a safe way of comparing if two vectors of floating point numbers are (pairwise) equa
+* syntax:near(x, y, tol = .Machine$double.eps^0.5)
+  + tol: Tolerance of comparison
+
+### Examples if-else and ifelse from Ren - p. 134 (ff.)
+*  create a function, that
+  + if input is numeric vector, returns first element of the vector
+  + if input is a list list(data = c(...), index = 3) returns the third element of data 
+* call the function 'take_it'
+```{r}
+# input: x, which is vector or list 
+take_it <- function(x) {
+  if (is.numeric(x)) {
+    x[1]
+  } else if (is.list(x)) {
+    x$data[[x$index]]
+  } else {
+    stop('Not supported input type')
+  }
+}
+take_it(x = list(data = c('a', 'b', 'c'), index =3))
+take_it(x = list(input = c('a', 'b', 'c'), index =3))
+# good to know: 
+# the function outputs NULL, NOT an error 
+# this is due by providing an incorrect input, this is valued as list with zero length, i.e. NULL 
+# extracting any value from (!) NULL is also NULL
+# same applies to: 
+take_it(x = list(index = 3))
+take_it(x = list(data = c('a', 'b', 'c'), indx =3)) 
+# for error in 'index' argument, one receives error message 
+# error occurs because, x$index turns out be NULL and extracting value from a vector by (!) NULL produces an error 
+```
+
+```{r}
+# incorporate sensitivity to erroneous input 
+take_it2 <- function(x) {
+  if (is.numeric(x)) {
+    x[1]
+  } else if (is.list(x)){
+    if(!is.null(x$data) && is.atomic(x$data)) { # note: smart choice because is.atomic and is.null create vectors of length 1; in these cases &&, which only examines the first element of a vector, save space
+      if (is.numeric(x$index) && length(x$index) == 1) {
+        x$data[x$index] # if correct input, return output as intended
+      } else { 
+        stop('Invalid index') # note: else statement refers to second if condition only in else if 
+      }
+    } else {
+      stop('Invalid data') # note: this else statement refers to first if condition in else if 
+    }  
+  } else {
+    stop('Not supported input type')
+  }
+}
+```
+
+#### pmin/pmax and ifelse (p. 155 functions with built-in vectorized functions)
+```{r}
+# write a function that outputs -5 for values < than -5 and 5 for values > 5
+spread <- function(x) {
+  if (x < -5) - 5 
+  else if (x > 5) 5 
+  else x
+}
+x <- seq(-20:10)
+spread(x)
+
+# function works w/ scalar input but is not automatically vectorized, therefore error message: x length >1 and only first element of x is used 
+
+# one solution: vectorized functions
+# 1. pmin/pmax
+spread2 <- function(x) {
+  pmin(5, pmax(-5, x)) # use min btw 5 and value > 5 (pmin), use max btw -5 and value <-5 (pmax)
+}
+
+# 2. nested ifelse 
+spread3 <- function(x) {
+  ifelse(x <-5, -5, ifelse(x > 5, 5, x))
+}
+```
+## T if-else-statements and switch() function
+* if you end up with a very long chain of if-else statements, you should consider rewriting 
+* one useful technique is the switch() function; it is an alternative to handle multiple if-else statements in a more compact way 
+* switch() is useful to collect different functions within one
+
+* syntax: switch(expr, ...)
+  + evaluates EXPR and accordingly chooses one of the further arguments in (...)
+  + expr: expression (numeric or character) to be evaluated
+  + ...: list of alternatives; if expr has a character-string value, these must be named (see expl.), perhaps except for one alternative to be used as a ‘default’ value
+  
+* from documentation: 
+  + switch works in 2 distinct ways, depending on whether the first argument evaluates to a character string or a number:
+  + **if expr evaluates to character string (e.g. symbol/variable)**: string is matched exactly to the names of the elements in (...)
+    + if there is a match, that element is evaluated, unless it is missing 
+    + if it is **missing, the next non-missing element is evaluated**, e.g. switch('cc', a = 1, cc =, cd=, d=2) evaluates to 2 
+    + if there is **more than one match, the first matching element is used** 
+    + if there is no match, but an unnamed element its value is returned
+  + **if expr evaluates to numeric (e.g. constant)**: value of expr is coerced to integer
+    + then function evaluates the corresponding element in (…) based on position
+    
+```{r}
+# with character string in expression
+check_input <- function(x) {
+switch(x,
+       y = message("yes"), 
+       n = message("no"),
+stop("Invalid input"))
+}
+check_input('n') # note that we have to provide character string as input
+
+algb <- function(x,y,op){
+  switch(op, 
+         plus = y+x,
+         minus = x-y)
+}
+algb(x=c(3,4), y=c(2,1), op='plus')
+
+# What does this switch() call do? What happens if x is “e”?
+switch(x,
+a = ,
+b = "ab",
+c = ,
+d = "cd"
+)
+
+switch('e',
+a = ,
+b = "ab",
+c = ,
+d = "cd"
+)
+
+# does not return any value 
+# with numeric input in expression
+check_input <- function(x) {
+switch(x, 
+       message("yes"),
+       message("no"),
+stop("Invalid input"))
+}
+check_input(2)
+```
+
+## T Stop() argument
+```{r}
+wt_mean <- function(x, w, na.rm = FALSE) { # reason for stop-argument: length of input data and weights vector should be equal
+  if (length(x) != length(w)) {
+    stop("'x and w must be the same length'", call.=TRUE) # call determines whether call should become part of the error message; if TRUE, the call (e.g. wt_mean(1:3, 4:7) will be part of error message
+  } 
+  if (na.rm) { # if there is an na.rm argument provided
+    miss <- is.na(x) | is.na(w)
+    x <- x[!miss] # when there is a missing in one vector, value at respective position should be excluded in both; therefore, non-vector-specific argument 'miss' is sufficient
+    w <- w[!miss]
+  }
+  sum(w * x)/sum(w)
+}
+
+wt_mean(c(1,2,3, NA, 5, 7), c(NA,3,4,4, 6, 8)) # yields NA (default of na.rm = F)
+wt_mean(c(1,2,3, NA, 5, 7), c(NA,3,4,4, 6, 8), na.rm = T) # yields wt mean
+```
+
+```{r}
+x <- c(1,2,NA)
+test <- function(x, na.rm = FALSE) {
+  if(na.rm) { #if False equals to false; so expression will not be executed
+    miss <- is.na(x)
+    x <- x[!miss]
+  } 
+  print(x)
+}
+test(x, na.rm = T)
+```
+## T Stopifnot() argument
+* function is intended for use in regression tests or also argument checking of functions, in particular to make them easier to read (in comparison to stop())
+
+* syntax stopifnot:
+* stopifnot(..., exprs)
+  + ..., exprs: any number of (typically but not necessarily logical) R expressions, which should each evaluate to (a logical vector of all) TRUE
+    + use either ..., list of the form stopifnot(expr1,expr2) or exprs, the latter typically of the form: 
+    stopifnot(exprs = {
+          expr1
+          expr2
+          })
+    or alternatively stopifnot({expr1; expr2})
+* in contrast to stop argument above, **one asserts what should be true rather than checking for what might be wrong**
+
+```{r}
+wt_mean <- function(x, w, na.rm = FALSE) {
+    stopifnot(length(x) == length(w)) # note, that in contrast to if-statement above, one asserts what should be true rather than checking for what might be wrong 
+  if (na.rm) { 
+    miss <- is.na(x) | is.na(w)
+    x <- x[!miss] 
+    w <- w[!miss]
+  }
+  sum(w * x)/sum(w)
+}
+```
+## T return() argument
+* the value returned by a function is usually the last statement it evaluates
+* however, one can choose to return an output earlier by using >return ()
+* return() should be used only in the following situation:
+  + we want to avoid that R runs a long and maybe complicated function, 
+whereas if certain conditions are simply not given, it could have stopped way earlier with a simpler solution
+    + e.g. if inputs empty, no computation possible -> return(NaN)
+  + we have an if-else statement with one complex and one simple block
+    + we can split if-else in: simple block > return > complex block
+
+## T <<- operator (Ren, p. 260ff): modifying objects outside a function 
+* <<- finds the variable outside the function first and modifies that object instead of copying one locally
+```{r}
+count <- 0
+lapply(c(1:3), function(x) {
+  result <- 1:x
+  count <<- count + length(result) # overwrite count, which in this case means count the total number of values created over all iterations/all lists created
+  result
+})
+count # 6
+```
+* note: R will first look for the variable inside the function 
+* **only if a variable value is not present inside the function, will it be searched for outside**
+* illustrating exp. (p. 264): 
+```{r}
+p <- 0
+fun2 <- function(x) {
+p <- 1
+x + p
+}
+fun2(1) # results in 2, i.e. p = 0 is ignored
+```
+
+* to best use functions in R, one needs a basic understanding of how R functions work
+* this includes the following concepts: Lazy Evaluation, Copy-on-modify mechanism, Lexical scoping, Environments
+* understanding these concepts allows to make R code more predictable, and therefore, higher productivity in finding bugs and writing properly functional code
+
 
 # Exercises R for Data Science - Wickham
 ## Exercises 19.2.1
@@ -23,34 +415,63 @@ rescale01 <- function(x) {
 }
 x <- c(5, 10, NA)
 rescale01(x)
+# result: 0 1 NA
 ```
 ```{r}
 rescale01.f <- function(x) {
-  rng <- range(x, na.rm = FALSE, finite = TRUE) # na.rm = T excludes missing values
+  rng <- range(x, na.rm = FALSE, finite = TRUE) 
   (x - rng[1]) / (rng[2] - rng[1])
 }
 x <- c(5, 10, NA)
 rescale01.f(x)
+# result: 0 1 NA
 ```
-* with na.rm False output is identical, i.e. containes one missing value 
+* with na.rm False output is identical, i.e. contains one missing value 
 ```{r}
 rescale01.fi <- function(x) {
-  rng <- range(x, na.rm = FALSE) # na.rm = T excludes missing values
+  rng <- range(x, na.rm = FALSE) 
   (x - rng[1]) / (rng[2] - rng[1])
 }
 x <- c(5, 10, NA)
 rescale01.fi(x)
+# Result: NA NA NA
 ```
-* answer: rng (intermediate function) cannot be calculated with missing values and na.rm = F
-* however, finite = T, omits all non-finite elements; NA is treaded as non-finite 
+* **answer**: rng (intermediate function) cannot be calculated with missing values and 
+na.rm = F
+* however, finite = T, omits all non-finite elements; NA is treated as non-finite 
 
 ### 2. In the rescale01(), infinite values are left unchanged (/not considered). Rewrite rescale01() so that -Inf is mapped to 0, and Inf is mapped to 1.
+```{r}
+# Wdh. (27.03.)
+# verbose solution
+rescale01_fi_mod <- function(x){
+  x[x == -Inf] <- 0
+  x[x==Inf] <- 1
+  rng <- range(x, na.rm = T)
+  (x-rng[1])/(rng[2]-rng[1])
+}
+x <- c(-Inf, 2, 3, Inf) 
+rescale01_fi_mod(x)
+system.time(rescale01_fi_mod(rep(c(Inf, -Inf, 2), times = 10e06))) # verstrichen: 1.36
+
+# if_else:
+rescale01_fi_mod2 <- function(x) {
+  x <- ifelse(x == -Inf, 0,x)
+  x <- ifelse(x == Inf, 1,x)
+  rng <- range(x, na.rm = T)
+  (x-rng[1])/(rng[2]-rng[1])
+}
+x <- c(-Inf, 2, 3, Inf) 
+rescale01_fi_mod2(x)
+system.time(rescale01_fi_mod(rep(c(Inf, -Inf, 2), times = 10e06))) # verstrichen: 1.7
+```
+
 ```{r}
 y <- c(Inf, 0, 5)
 rescale01.fi <- function(y) {
   y <- ifelse(y == Inf, 1, y)
   y <- ifelse(y == -Inf, 0, y)
-  rng <- range(y, na.rm = FALSE) # na.rm = T eycludes missing values
+  rng <- range(y, na.rm = FALSE) # na.rm = T excludes missing values
   (y - rng[1]) / (rng[2] - rng[1])
 }
 rescale01.fi(y)
@@ -60,7 +481,7 @@ rescale01.fi(y)
 rescale01.fi <- function(y) {
   y[y == Inf] <- 1
   y[y == -Inf] <- 0
-  rng <- range(y, na.rm = FALSE) # na.rm = T eycludes missing values
+  rng <- range(y, na.rm = FALSE) # na.rm = T excludes missing values
   (y - rng[1]) / (rng[2] - rng[1])
 }
 rescale01.fi(y)
@@ -72,6 +493,47 @@ mean(is.na(x)) #[1]
 x / sum(x, na.rm = TRUE) #[2]
 
 sd(x, na.rm = TRUE) / mean(x, na.rm = TRUE) #[3]
+```
+```{r}
+# Wdh. 27.03. 
+# [1]
+prop_na <- function(x) {
+  na <- x[is.na(x)==T]
+  length(na)/length(x)
+}
+x <- c(1,2,NA,4,7,NA)
+prop_na(x)
+
+# [2]
+relative <- function(x) {
+  x/sum(x, na.rm = T)
+}
+x <- c(NA,2,NA,rep(3, times=10))
+relative(x)
+
+relative2 <- function(x) {
+  x/sum(x)
+}
+relative2(x) # yields only NAs
+# hence, we don't have to include na.rm as default value; 
+# sum can only be calculated when NAs are omitted
+
+relative3 <- function(x, na.rm =F) {
+  x/sum(x, na.rm = na.rm)
+}
+relative3(x) # yields only NAs
+
+#[3]: sd(x, na.rm = TRUE) / mean(x, na.rm = TRUE) 
+vc <- function(x) {
+  n <- length(x[!is.na(x)])
+  avg <- sum(x, na.rm = T)/n
+  sd1 <- sqrt(sum((x-avg)^2, na.rm = T)/(n-1))
+  sd1/avg
+}
+x=c(1,NA,2,4,5,9)
+vc(x) # 0.74
+# test: 
+sd(x, na.rm = T)/mean(x, na.rm = T) #0.74
 ```
 
 ```{r}
@@ -86,13 +548,10 @@ prop_na(x)
 # calculates relative proportion of each value in x, excluding missing values 
 # applied to a vector, this will normalize
 x <- c(1,3,NA)
-normalize <-  function(x, na.rm = F) {
-  x/sum(x, na.rm = na.rm)
+normalize <-  function(x) {
+  x/sum(x, na.rm = T)
 }
 normalize(x)
-# by including na.rm as input, we can decide how NAs are handled: 
-# when na.rm = F NAs do not get dropped, hence, we get all NAs and thereby, a notifcation that there are NAs still in the dataset
-# when na.rm = T NAs do get dropped, and vector excl. NAs will be get standardized
 ```
 ```{r}
 # [3]
@@ -114,7 +573,19 @@ variance <- function(x, na.rm =F) {
 }
 variance(x)
 ```
-![Schätzer Schiefe](D:/Studies/Postgraduate Studies/Sem 1-R&SQL_for_Business_Analytics/3.Zusammenfassungen_&_Guidelines/Ch._19_Functions/1.Schiefe-erwartungstreu.png)
+![Schaetzer Schiefe](D:/Studies/Postgraduate Studies/Sem 1 - R&SQL_for_Business_Analytics/3.Zusammenfassungen_&_Guidelines/R-Training-Functions/1.Schiefe-erwartungstreu.png)
+```{r}
+# Wdh. 27.03.
+skwness <- function(x){
+  n <- length(x[!is.na(x)])
+  avg <- sum(x, na.rm = T)/n
+  sd <- sqrt(sum((x-avg)^2, na.rm =T)/(n-1))
+  sk <- sum(((x-avg)/sd)^3)
+  n/((n-1)*(n-2))*sk
+}
+x <- c(1,1,1,1,2,4,5,6,7,0)
+skwness(x)
+```
 
 ```{r}
 # Skewness
@@ -127,6 +598,24 @@ skewness <-  function(x, na.rm = T) {
 ```
 
 ### 5. Write both_na(), a function that takes two vectors of the same length and returns the number of positions that have an NA in both vectors
+```{r}
+# Wdh. 27.03.
+both_na <- function(x,y){
+  sum(is.na(x) & is.na(y))
+}
+x <- c(NA,1,2,NA)
+y <- c(NA,1,2,3)
+both_na(x,y)
+```
+### 5.1 Write function that takes two vectors of the same length and returns the positions that have an NA in both vectors
+```{r}
+both_na <- function(x,y){
+  which(is.na(x) & is.na(y))
+}
+x <- c(NA,1,2,NA)
+y <- c(NA,1,2,NA)
+```
+
 ```{r}
 a <- c(NA, 1,NA,3)
 b <- c(NA, 4,NA, 5)
@@ -145,7 +634,7 @@ is_directory <- function(x) file.info(x)$isdir
 is_readable <- function(x) file.access(x, 4) == 0
 # file.access returns information about accessibility of a dest of a path (x)
 # '4' is a hyperparameter named mode; mode = 4 tests for read permission
-# file.access outputs integer vector w/ value 0 for succes and -1 for failure
+# file.access outputs integer vector w/ value 0 for success and -1 for failure
 # thus, the function tests whether a user has read permission on a file
 is_readable('D:/Studies/Postgraduate Studies/Sem 1-R&SQL_for_Business_Analytics/3.Zusammenfassungen_&_Guidelines/Ch._19_Functions/1.Schiefe-erwartungstreu.png')
 ```
@@ -168,8 +657,7 @@ f2 <- function(x) {
   if (length(x) <= 1) return(NULL)
   x[-length(x)]
 }
-# drops the last value (indexed using length ()) in a vector
-# better name: drop_last
+
 
 f3 <- function(x, y) {
   rep(y, length.out = length(x))
@@ -191,7 +679,6 @@ morgen
 ```{r}
 # it is easier to understand what norm_r is actually doing: we look at normal distribution and take a random sample; that it is a normal distribution is the most important thing to understand first
 ```
-
 ## Exercises 19.4.4
 ### 1. What’s the difference between if and ifelse() ? Carefully read the help and construct three examples that illustrate the key differences.
 ```{r}
@@ -199,6 +686,20 @@ morgen
 ?`if`
 ```
 ### 2. Write a greeting function that says “good morning”, “good afternoon”, or “goodevening”, depending on the time of day. (Hint: use a time argument that defaults to lubridate::now() . That will make it easier to test your function.)
+```{r}
+# Wdh. 30.03.
+greeting <- function(now = lubridate::now()) {
+  if (lubridate::hour(now) >= 12) {
+    print('good afternoon')
+  } else if (lubridate::hour(now) >= 18) {
+    print('good evening')
+  } else print('good morning')
+}
+
+greeting()
+greeting(now = '2020-03-30 00:53:23 CEST')
+```
+
 ```{r}
 library(lubridate)
 # ?now() # gives current time "2020-01-27 18:09:18 CET"
@@ -215,6 +716,25 @@ greeting <- function(now) {
 greeting(now())
 ```
 ### 3. Implement a fizzbuzz function. It takes a single number as input. If the number is divisible by three, it returns “fizz”. If it’s divisible by five it returns “buzz”. If it’s divisible by three and five, it returns “fizzbuzz”. Otherwise, it returns the number. Make sure you first write working code before you create the function.
+```{r}
+# Wdh. 30.03.
+# with modular operator for single number
+fizzbuzz <- function(x, buzz = 5, fizz = 3) {
+  if( x%%buzz ==0 && x%%fizz ==0){
+    print('fizzbuzz')
+  } else if (x%%buzz ==0) {
+    print('buzz')
+  } else if (x%%fizz == 0) {
+    print('fizz')
+  } else {
+    x 
+  }
+}
+fizzbuzz(15)
+
+
+```
+
 ```{r}
 fizzbuzz <- function(x) {
   if(x/3 == floor(x/3) & x/5 != floor(x/5)) { # divisible by 3, but not 5
@@ -264,79 +784,35 @@ fizzbuzz <- function(x, buzz= 5, fizz = 3) {
 }
 fizzbuzz(15)
 ```
-### Switch function
-* useful to collect different functions within one
-* it is an alternative to handle multiple if-else statements in a more compact way 
+# Data Import Functions
+## Download csv file from web (if it does not exist)
+*Source: https://nicercode.github.io/guides/repeating-things/
 ```{r}
-algb <- function(x,y,op){
-  switch(op, 
-         plus = y+x,
-         minus = x-y)
+# imagine we have the following URLs to a csv file and we want to check whether the file already exists in our directory: 
+# "http://nicercode.github.io/guides/repeating-things/data/Melbourne.csv"
+# "http://nicercode.github.io/guides/repeating-things/data/Sydney.csv"   
+# "http://nicercode.github.io/guides/repeating-things/data/Brisbane.csv" 
+# "http://nicercode.github.io/guides/repeating-things/data/Cairns.csv"   
+
+# write a function with which you can download each file
+download_nonexist <- function(url, fetch = FALSE, path = ".") {
+  dest <- file.path(path, basename(url)) # basename is a neat function that strips away the path until and including the last path delimiter (e.g. /,\)
+  if (fetch || !file.exists(dest))# file.exists returns a logical vector indicating whether the files named by its argument exist
+    download.file(url, dest) # download.file is a base function used to download files from web
+  print(dest)
 }
-algb(x=c(3,4), y=c(2,1), op='plus')
-
-# What does this switch() call do? What happens if x is “e”?
-switch(x,
-a = ,
-b = "ab",
-c = ,
-d = "cd"
-)
-
-
-switch('e',
-a = ,
-b = "ab",
-c = ,
-d = "cd"
-)
-# does not return any value 
 ```
-
-### Stop argument
+## Read CSV into R
 ```{r}
-wt_mean <- function(x, w, na.rm = FALSE) { # reason for stop-argument: length of input data and weights vector should be equal
-  if (length(x) != length(w)) {
-    stop("'x and w must be the same length'", call.=TRUE) # call determines whether call should become part of the error message; if TRUE, the call (e.g. wt_meain(1:3, 4:7) will be part of error message
-  } 
-  if (na.rm) { # if there is an na.rm argument provided
-    miss <- is.na(x) | is.na(w)
-    x <- x[!miss] # when there is a missing in one vector, value at respective position should be excluded in both; therefore, non-vector-specific argument 'miss' is sufficient
-    w <- w[!miss]
-  }
-  sum(w * x)/sum(w)
+# the first column, time of each file is a string representing date and time, which needs processing into R’s native time format 
+import_csv <- function(filename){
+  d <- read_csv(filename)
+  d$time <- as.POSIXct(d$time)
+  d# check stringAsFactor option in read_csv
 }
-
-wt_mean(c(1,2,3, NA, 5, 7), c(NA,3,4,4, 6, 8)) # yields NA (default of na.rm = F)
-wt_mean(c(1,2,3, NA, 5, 7), c(NA,3,4,4, 6, 8), na.rm = T) # yields wt mean
-```
-
-```{r}
-x <- c(1,2,NA)
-test <- function(x, na.rm = FALSE) {
-  if(na.rm) { #if False equals to false; so expression will not be executed
-    miss <- is.na(x)
-    x <- x[!miss]
-  } 
-  print(x)
-}
-test(x, na.rm = T)
 ```
 
 
-
-# To DO 
-* finish the chapter DONE
-* Github wieder aufnehmen und einrichten; insbesondere Kaggle competition einrichten
-* go over my solutions with solutions online (DO)
-* go over lecture script and add to Ch 19 summary script and notes if necessary (DO)
-* read through notes (FR)
-* do additional tasks from lecture (FR)
-* read through base R stuff again (FR)
-* write functions for master thesis script (DO)
-* do a simple for loop again (DO)
-* start with Ren and apply function family (FR)
-* start with Kaggle challenge
 
 
 
