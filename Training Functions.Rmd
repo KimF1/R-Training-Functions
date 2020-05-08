@@ -89,6 +89,7 @@ out into independent pieces that can be easily reused and updated
   + 3. Save functions in one directory
   + when you want to work with those functions: 
   + 4. At the top of current .Rmd or R script add: source('path/filename.format')
+
 ```{r}
 source('D:/Studies/Postgraduate Studies/Sem 1 - R&SQL_for_Business_Analytics/UDFs/fizzbuzz.R')
 ```
