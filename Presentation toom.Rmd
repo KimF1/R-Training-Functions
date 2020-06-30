@@ -1,0 +1,1019 @@
+---
+title: "Presentation toon"
+author: "Kim Julia Fuchs"
+date: "13 5 2020"
+output: powerpoint_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+# Libraries
+```{r}
+library(MASS)# IMPORTANT: MASS::select and dplyr::select conflict; therefore it is important to load MASS first so that dplyr select overwrite MASS select
+library(tidyverse)
+library(DataExplorer)
+library(lubridate)
+library(plotly)
+library(cluster )
+library(factoextra)
+library(TSdist)
+library(NbClust)
+library(nnet)
+```
+
+## R Markdown
+
+This is an R Markdown presentation. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document.
+
+## Slide with Bullets
+
+- Bullet 1
+- Bullet 2
+- Bullet 3
+
+## Slide with R Output
+
+```{r cars, echo = TRUE}
+summary(cars)
+```
+
+## Slide with Plot
+
+```{r pressure}
+plot(pressure)
+```
+# Hintergrund
+* 360 Baumärkte 
+* Erfolg basiert auf einem umfassenden Konzept, das Maßstäbe in der DIY Branche setzt
+* Sortiment rund um die Themen: Bauen, Renovieren, Verschönern 
+* in erster Linie ist das Angebot auf Bedürfnisse und Fertigkeiten von **versierten Heimwerkern und Gelegenheitsheimwerkwerkern** zugeschnitten
+* darüber hinaus: *umfangreiche Serviceleistungen*, wie z.B. Handwerkerservice  
+  + zeichnet sich durch hohe Beratungs- und Lösungskompetenz aus 
+  
+
+# Aufgabenstellung 
+"wie du weißt haben wir ein sehr *breites und heterogenes Marktnetz*. Jetzt ist es an der Zeit *Märkte besser zu verstehen*. Daher meine besondere Bitte an dich: Kannst du dir einmal die *Umsatzzahlen der letzten Jahre* ansehen? (1) Ist es möglich eine *Clusterung der Märkte* vorzunehmen? Es wäre wichtig, *den zeitlichen Verlauf der Umsatzzahlen in der Clusterung zu berücksichtigen*. 
+(2) *Welche Faktoren können die Umsatzentwicklung der Märkte bzw. Cluster erklären?*
+Und könntest du uns kurz schildern, welche 3-4 Handlungsempfehlungen du daraus ableitest?
+
+* es geht hier also ganz klar um die *Entwicklung* der *Jahres*Umsätz, nicht die Analyse bzw. Erklärung von Tagesumsätzen/Monatsumsätzen im statischen Sinne
+* Marktsegmentierung wie Kundensegmentierung: Identifikation von Märkten die hinsichtlich wichtiger Merkmale möglichst homogen sind und damit wahrscheinlich das gleiche 
+* Kausalität in Zeitreihen: https://towardsdatascience.com/inferring-causality-in-time-series-data-b8b75fe52c46#1920
+  
+
+# Daten und Skalierung/Typisierung
+```{r}
+um <- read.csv(file = 'umsatz.csv', sep= ";") # Datum as date, Umsatz as double 
+um$Datum <- as.Date(um$Datum)
+um$Umsatz <- as.numeric(um$Umsatz)
+str(um)
+```
+```{r}
+fs <- read.csv(file = 'filialstammdaten.csv', sep= ";") 
+str(fs)
+```
+
+# Variablen
+## Visualize frequency tables for factor variables with DT package
+```{r}
+fs %>% group_by(StoreID) %>% nrow() # 214 vers Stores
+# frequency table for all factor variables using formattable table
+lapply(fs %>% select_if(is.factor),  function(f) {
+  fq <- table(f)
+  fqt <- DT::datatable(as.data.frame(fq))
+})
+```
+
+## Visualize binary variables: purrr 
+### create frequency table containing multiple columns at once 
+### using dyplr
+```{r}
+n <- nrow(fs)
+fs_bin_t <- fs %>% 
+  select_if(is.integer) %>% 
+  select(-c(ends_with("ID"), ends_with("QM"), Service_Miettransporter_Verl_Anz)) %>%
+  t() %>%  # transpose df
+  as.data.frame() %>% # transform to df
+  rownames_to_column('bin_variable') # extract rownames after transposition to a separate column; call it bin_variable
+
+fs_bin_t[,2] <- rowSums(fs_bin_t[,2:215], na.rm = T, dims = 1) # calculate the rowsum over the binary variables; exclude bin_variable; set rowsum to be the second column
+fs_bin_t <- fs_bin_t %>% 
+  .[,1:2] %>% # select only the first 2 columns; use dot so that we can use base r grammar; dot is placeholder for original df being operated on
+  rename(freq_1 = V1) %>% 
+  mutate(freq_0 = n - freq_1) %>% # add column for frequency of 0s
+  DT::datatable(as.data.frame(.)) # add interactive table layer using DT
+fs_bin_t
+
+# fs_bin_freqt2 <- fs_bin_freqt %>% 
+  # mutate(freq_0 = ifelse(grepl("^.*0",bin_var),freq, 0), freq_1 = ifelse(grepl("^.*1", bin_var), freq, 0))
+```
+* *note: 12 binary variables have 0 variance* 
+
+### using apply function
+```{r}
+# other trials: 
+# apply function: 
+# creates an array with dimension c(n, dim(x))* and n = length of FUN vector
+# therefore, it is way shorter than dypler solution above
+fs_bin <- fs %>% 
+  select_if(is.integer) %>% 
+  select(-c(ends_with("ID"), ends_with("QM"), Service_Miettransporter_Verl_Anz))
+
+view(t(apply(fs_bin, 2, function(i) c(freq_1 = sum(i), freq_0 = nrow(fs_bin) - sum(i)))))
+
+
+fs_bin %>% map_df(~ data_frame(x = .x)) # convert each of these vectors of variables into a dataframe  
+t_fs_bin <-as.data.frame(t(fs_bin))
+
+table_l <- as.list(table(fs_bin))
+do.call("cbind", table_l)
+
+pmap(t_fs_bin, ~list(1:214, freq0 = sum(. == 0, na.rm =T), freq1 = sum(. == 1, na.rm = T))) # here the dot should be element in 'list'             
+
+#s(fs %>% select_if(is.integer))[,-1]
+lapply((fs %>% select_if(is.integer))[,-c(1:2)], function(f) {
+  fq <- table(f)
+  fqt <- DT::datatable(as.data.frame(fq))
+  })
+# 36 binäre Variablen, 1 Anzahl MiettransporterVerleih
+
+length(which(!(lapply(fs %>% select_if(is.integer) %>% select(-c(1:2)), function(x) length(unique(x))))>1))
+```
+
+```{r}
+ggplot(fs_bin_freqt2, aes(x = bin_var, y = freq, fill = bin_fact)) + geom_col(stat = "identity") + coord_flip()
+```
+
+
+## Kaufkraftindex
+- 172 level, daher Annahme, dass Kaufkraftindex auf Store-Level (verm. Landkreis) angegeben ist 
+- weiterhin Annahme für Kausalannahme, dass KI über den Zeitraum der Umsatzerfassung konstant geblieben ist 
+https://www.ihk-nordwestfalen.de/branchen/handel/einzelhandel/service/handelskennziffern-3594882#titleInText0
+
+Kaufkraft: Summe des verfügbaren Einkommens, dass für Privatkonsum ausgegeben werden kann
+- **gilt als Währung zur Bestimmung des Nachfragepotenzials**
+- Kaufkraftkennziffern *bewerten regionale Teilmärkte hinsichtlich ihrer (nominalen) Kaufkraft*
+  - zeigen die *regionalen Unterschiede bzw. die regionale Verteilung der Kaufkraft* 
+  - und dienen *u.a. als Grundlage für die Standortplanung (Standortpolitik) der Handelsbetriebe*
+- Berechnung Kaufkraft: stellt eine Prognose für das aktuelle Jahr auf Datenbasis des letzten Jahres dar  
+    - als Basis für die Berechnung dienen die amtlichen Lohn- und Einkommensstatistiken 
+
+K-Index einer Region (Bundesland, Bezirk, Gemeinde, PLZ-Gebiet):
+  - meist als **Index je 100 Einwohner**
+  - Kaufkraft pro (100) Einwohner der Region relativ zum Landesdurchschnitt (100)
+# Informationen zur Kaufkraft in 2019 
+https://www.gfk.com/de/insights/press-release/deutsche-haben-2019-rund-763-euro-mehr-zur-verfuegung/
+  - höchste Kaufkraftdurchschnitt Deutschlands im bayerischen Landkreis Starnberg (laut KI 43% über dem Bundesdurchschnitt), Rang 2 LK Hochtaunuskreis, Rang 3 und 4 LK und SK München (37 und 34 % über dem Bundesdurchs)
+  - 25 einwohnerstärksten Stadtkreise vereinen 1/4 des Gesamtkaufkraft in DE
+  - Interessante SKs: SK Berlin Rang 291, SK Hamburg Rang 55, SK Köln 97
+  - bzgl. Kaufkraftdichte: hohe Potenzialabschöpfung auf kleinem Raum 
+    - *einwohnerstarke Städte und insbesondere Metropolregionen für Einzelhändler und Dienstleister unverzichtbare Zielmärkte*
+    - das zeigt ein Blick auf die Kaufkraftsummen
+    - Kaufkraftdichte = Kaufkraftsumme in Millionen Euro je QM
+    - ist in Metropolen wie Berlin, Hamburg, München, aber auch in Nürnberg, dem Ruhrgebiet, dem Großraum Stuttgart und Frankfurt, sehr hoch 
+    - **Kaufkraftdichte ist also ein wichtige Indikator, dass Unternehmen dort auf kleinstem Raum     viel Kaufkraftpotential allein schon bei den dort lebenden Menschen abschöpfen können, wenn sie ihre Zielgruppe gezielt ansprechen**
+    
+## Potential je Einwohner 
+* Beim Baumarktsortiment ist zu beachten, dass das Potenzial in ländlichen Regionen meist höher ist als in städtischen Gebieten, da mehr Wohnraum und Gartenfläche je Person zur Verfügung steht
+* dieser Effekt kann überlagert werden von Einkommensgefällen zwischen der Stadt und dem Land, sodass Städte doch ggf. mehr Potential haben als die ländlichen Regionen 
+
+
+## Left Join Tabellen
+```{r}
+um_fs <- merge(um, fs, by = 'StoreID', all.x = TRUE)
+```
+
+# EDA
+```{r}
+DataExplorer::introduce(um_fs)
+```
+```{r}
+DataExplorer::plot_bar(fs)
+```
+```{r}
+DataExplorer::plot_histogram(fs[,c(which(colnames(fs) %in% c("VerkaufsflaecheQM", "Einwohnerdichte", "KaufkraftIndex", "PotenzialJeEinwohner")))]) 
+```
+## Verteilungsanalyse 
+```{r}
+um %>% summarize(Anfangsdatum = min(Datum),min = min(Umsatz), max = max(Umsatz), mean = mean(Umsatz), median = median(Umsatz))
+```
+### Zeitreihe ist normiert auf 2012-01-02
+```{r}
+um %>% select(Umsatz, Datum) %>% filter(Datum == '2012-01-02') # normiert auf den Startwert  1 (100%) am 02-01-2012 
+um %>% select(Umsatz, Datum) %>% filter(Datum == '2013-01-01') # zum 01.01. eines Jahres liegen keine Werte vor
+```
+### Stats Tagesumsätze per Store
+```{r}
+print(DesStats_um_Tag_Store <- um %>% group_by(StoreID) %>% summarize_at(vars(Umsatz), funs(min(.,na.rm =TRUE), max(.,na.rm=TRUE), mean = mean(.,na.rm=TRUE), median = median(.,na.rm=TRUE), var = var(.,na.rm=TRUE), sd = sd(.,na.rm=TRUE))) %>% arrange(desc(median)))
+```
+* auf den ersten Blick scheinen sich die Stores hinsichtlich der Umsatzverteilung zu unterscheiden 
+
+```{r}
+range(DesStats_um_Tag_Store$mean) 
+```
+
+```{r}
+for (i in 1:length(unique(um$StoreID))) {
+  plot <- 
+      ggplot(subset(um, um$StoreID==unique(um$StoreID)[i]),
+             aes(Umsatz, group = StoreID)) +
+    geom_histogram()+
+    labs(title = unique(um$StoreID)[i])
+  print(ggplotly(plot))
+}
+```
+* alle Zeitreihen sind rechtsverzerrt; log-Trans dürfte Normalverteilung herbeiführen 
+
+## Zeitreihenanalyse (Umsatz)
+### Tagesumsatz gesamt
+```{r}
+# Tagesumsatz:
+um %>% select(Umsatz, Datum) %>% group_by(Datum) %>% ggplot(aes(x= Datum, y = Umsatz)) + geom_line()
+```
+### Tagesumsatz per Stores
+```{r}
+for (i in 1:length(unique(um$StoreID))) {
+  plot <- 
+      ggplot(subset(um, um$StoreID==unique(um$StoreID)[i]),
+             aes(Datum, Umsatz, group = StoreID)) +
+    geom_line()+
+    labs(title = unique(um$StoreID)[i])
+  print(ggplotly(plot))
+}
+```
+#### Eigenschaften der Zeitreihen
+* die Zeitreihen zeigen grundsätzlich drei Komponenten: Saisonalität (liegt bei allen Zeitreihen vor), Trend (liegt bei  manchen Zeitreihen vor), teilweise eindeutige shocks 
+* Trend: 
+  - teilw. trend-stationär (deterministischer Trend) mit oder ohne einzelner, enormer Shocks (in den Jahren 2015-2018)
+* Saisonalität: auf den ersten Blick in jeder Zeitreihe vorhanden
+
+```{r}
+decom <- decompose(store_1001656656$Umsatz, type = c("additive"), filter = NULL) # konnte keine Saisonalität feststellen ?
+```
+#### Dickey-Fuller-Test 
+```{r}
+
+```
+### Monatsumsätze
+```{r}
+# Monatsumsatz: 
+Monatsumsatz <- um %>% mutate(Monat_Jahr = format(Datum,"%Y-%m")) %>% dplyr::group_by(Monat_Jahr) %>% summarize(Monatsumsatz =sum(Umsatz)) 
+# test:
+Monatsumsatz %>% summarize(summe = sum(Monatsumsatz)) #663079.9748 total
+
+Monatsumsatz_p <- Monatsumsatz %>% 
+  arrange(Monat_Jahr) %>% 
+  ggplot(aes(x = Monat_Jahr, y =Monatsumsatz, group = 1)) + 
+  geom_line(color = "gray21") +
+  theme_light() +
+  theme(axis.text.x = element_text(angle = 90, size =8))
+ggplotly(Monatsumsatz_p)
+```
+* leichter linearer Aufwärtstrend
+* Saisonalität, mit April und Mai als den stärksten Monaten (Ausnahme: 2014, da war März und April die stärksten Monate)
+
+### Monatsumsätze per Store
+```{r}
+um_mon_1001656656 <- Monatsumsatz_Standort_df %>% filter(StoreID == '1001656656') 
+um_mon_1001656403 <- Monatsumsatz_Standort_df %>% filter(StoreID == '1001656403')
+
+Monatsumsatz_Standort_df <- um %>% 
+  mutate(Monat = month(Datum), Jahr= year(Datum), Monat_Jahr = format(Datum,"%Y-%m")) %>%
+  group_by_at(vars(StoreID, Monat_Jahr)) %>% 
+  mutate(Monatsumsatz_Standort = sum(Umsatz)) %>% 
+  ungroup() %>% 
+  dplyr::select(.,-c(Umsatz,Datum)) %>%   
+  distinct() %>% 
+  group_by(StoreID, Monat) %>% 
+  mutate(YOY_Monat = Monatsumsatz_Standort - dplyr::lag(Monatsumsatz_Standort, n = 1), 
+         # müsste Zeittrend entsprechen
+         YOY_Monat_pct = (Monatsumsatz_Standort/dplyr::lag(Monatsumsatz_Standort, n = 1)-1)* 100 
+         # trend
+         ) %>% 
+  ungroup()
+  
+
+Monatsumsatz_Standort_df_p <- Monatsumsatz_Standort_df %>% arrange(Monat_Jahr)
+  
+for (i in 1:length(unique(Monatsumsatz_Standort_df_p$StoreID))) {
+  plot <- 
+      ggplot(subset(Monatsumsatz_Standort_df_p, Monatsumsatz_Standort_df_p$StoreID==unique(Monatsumsatz_Standort_df_p$StoreID)[i]),
+             aes(Monat_Jahr, Monatsumsatz_Standort, group = StoreID)) +
+    geom_line()+
+    theme(axis.text.x = element_text(angle = 90, size =12), axis.text.y = element_text(size =12))+
+    labs(title = unique(Monatsumsatz_Standort_df_p$StoreID)[i])
+  print(ggplotly(plot))
+}
+```
+- Saisaonabhängige (Wochentage, Monate) Schwankungen aller Stores
+- sowohl pos. als auch negativer Trend erkennbar 
+- Ziel der Analyse ist es, Stores mit einem ähnlichen Muster zusammenzufassen und die Unterschiede zwischen den Clustern durch Merkmale der Region und der jeweiligen Stores zu erklären
+
+## Ähnlichkeitssuche in Zeitreihen
+### Länge der Zeitreihen
+```{r}
+# Länge Tagesumsatzreihen
+for (i in seq(length(unique(um$StoreID)))){
+  n <- length(um$StoreID[um$StoreID == unique(um$StoreID)[i]])
+  print(n)
+}
+# Zeitreihen haben unterschiedliche längen 
+```
+### Preprocessing
+* I decide not to preprocess the data, i.e. detrend and -seasonalize, as I want the clusters to capture this behavior instead
+```{r}
+# possibilities for detrending:
+pracma::detrend(Monatsumsatz_Standort_df$Monatsumsatz_Standort[Monatsumsatz_Standort_df$StoreID == '1001656403'], tt ='linear')
+# else linear regression on time trend and seasonal dummies
+```
+
+### Discrete Fourier-Transformation (DFT)
+* Dimensionsreduktion für Zeitreihen für die Feature-basierte Abstandsermittlung
+* Feature-basierte Abstandsermittlungen extrahieren zunächst die Features/Attribute der Zeitreihe und messen dann den Abstand zwischen den Feature
+* die Fourier-Transformation ist notwendig, da die in Clusterverfahren benutzten Distanzmaße, die Merkmale vertikal, d.h. unabhängig voneinander, betrachten
+* eine horizontale Verschiebung in den Daten kann nicht berücksichtig werden
+* Bsp. es kann ja sein, dass wir zwei Stores haben, die beide in einem betrachteten Zeitraum von 5 Jahren ein sehr erfolgreiches Jahr hatten, allerdings in unterschiedlichen Jahren; 
+* eine solche Ähnlichkeit kann durch Clusterverfahren so nicht erkannt werden, da jedes Jahr (im Bsp. oben) unabhängig betrachtet würde
+* wir müssen die Zeitreihe also so transformieren, dass die Reihenfolge der "Attribute" irrelevant wird 
+* dies lässt sich durch die Fourier-Transformation erreichen 
+
+* mit der Fourier-Transformation wird versucht die Frequenz der Zeitreihe (oder eines Zeitsignals wie z.B. eine Knall) zu ermitteln
+* Fourier Transformation transformiert eine Zeitreihe von der Zeitebene (x(t)) in die Frequenzebene (X(f))
+* the collection X(f) at frequencies f, are called the specturm of x(t)
+* *in other words: the fourier transformation decomposes a time series into different cycles (constisting of amplitudes, offset and rotation speed) that the series are composed off
+
+![time to frequency](D:/Studies/Postgraduate Studies/Präsentation toom/DFT time_frequency.png)
+
+
+* mit Hilfe der Fourier-Transformation kann eine Zeitreihe von der Form [Zeitpunkt, Amplitude] in [Frequenz, Amplitude, Phase] umgewandelt werden
+* *jedes Element des Fourier-Vektors beschreibt ein Attribut der Zeitreihe, über das gesamte Intervall, wodurch gleichzeitig die Reihenfolge der Elemente des Fourier-Vektors für das Data Mining unwichtig wird*
+* Fourier coefficients have several adv over other methods: 
+  * dimension of a data set can be reduced to several Fourier coefficients 
+  * die Anzahl der in der Ähnlichkeitsuche verwendeten Fourier-Koeffizienten, lassen sich relativ klein halten und trotzdem wird die originale Zeitreihe sehr gut abgebildet
+  * *the sample Fourier coefficients asymptotically follow the multivariate normal distribution*; offers possibility for model-based clustering (Gaussian mixture model)
+
+* *erster Output ist Basis und kein Koeffizient*
+* oft werden nur jene Fourier Koeffizienten verwendet, die niedrigen Frequenzen zugeordnet sind und somit grobe Formen beschreiben
+* Koeffizienten,die den höheren Frequenzen zugeordnet sind, beschreiben Details und werden ignoriert
+* fft() returns a 1d vector of complex numbers: 2d euklidischer Raum
+* wenn wir also später die euklidische Distanz zwischen den komplexen Zahlen bestimmen, bestimmen wir den Abstand zwischen dem realen (Kosinus-) Teil und imaginären (Sinus-) Teil
+*  wurde die FFT auf ursprünglich reelle Werte angewandt, so sind von
+den N komplexen Werten nur die ersten N/2 + 1 Werte von Bedeutung
+* die restlichen Werte entsprechen den negativen Frequenzen, die für den Fall, dass alle Imaginärteile der Eingangsfunktion Null waren, die konjugiert Komplexen der ersten N/2 Werte darstellen und somit keinerlei zusätzliche Information enthalten
+
+#### Vergleich ARIMA coefficients
+* for a given time series, the parameters of the AutoRegression Moving Average
+(ARMA) model are estimated and can be used as a limited dimensional vector for the
+original time series in a classification problem (Deng et al., 1997). 
+* However, using ARMA parameters is not a reliable method because different sets of parameters can be obtained even from time series with similar structure that could affect the clustering results dramatically
+
+#### Vergleich Decomposition 
+file:///C:/Users/Kim%20F/Desktop/Characteristic-Based_Clustering_for_Time_Series_Da.pdf
+* Zeitreihe könnte zerlegt werden in Trend, Saisonalität, Autokorrelation, Skewness, Kurtosis
+* Nachteil: 214 vers. Zeitreihen
+
+#### PCA
+* PCA is an effective dimensionality reduction method for data, where the order is irrelevant, i.e. we do not have a time series 
+* then PCA explains variance-covariance structure of a set of variables within linear combinations 
+
+#### DFT calculation (alternative: go to Datensatz Cluster for direct distance calculation)
+* most of the energy in real-world signals, is concentrated in the low frequencies 
+* that means that only a limited number of (low) frequencies are required to obtain a good approximation of the original time series
+* according to the Nyquist-Shannon sampling theorem, only the first n/2 or fewer frequencies should be used 
+
+```{r}
+# number of Fourier Transformations 
+k_l <- 30
+k_u <- 96/2
+
+# without constants
+dft_mon <- Monatsumsatz_Standort_df %>% 
+  group_by(StoreID) %>% arrange(Monat_Jahr) %>% 
+  mutate(DFT = fft(Monatsumsatz_Standort)) %>% # calculate discrete fourier trans
+  select(StoreID, DFT) %>% 
+  group_by(StoreID) %>% 
+  filter(!row_number()==1) %>% # filter out constants
+  group_by(StoreID) %>% 
+  filter(row_number() %in% c(1:k)) # select the first 30 Fourier Trans complex coefficients
+
+# datasets with constant
+dft_mon_c_30  <- Monatsumsatz_Standort_df %>% #with constants
+  group_by(StoreID) %>% arrange(Monat_Jahr) %>% 
+  mutate(DFT = fft(Monatsumsatz_Standort)) %>% # calculate discrete fourier trans
+  select(StoreID, DFT) %>% 
+  group_by(StoreID) %>% 
+  filter(row_number() %in% c(1:(k_l+1)))
+
+dft_mon_c_48  <- Monatsumsatz_Standort_df %>% #with constants
+  group_by(StoreID) %>% arrange(Monat_Jahr) %>% 
+  mutate(DFT = fft(Monatsumsatz_Standort)) %>% # calculate discrete fourier trans
+  select(StoreID, DFT) %>% 
+  group_by(StoreID) %>% 
+  filter(row_number() %in% c(1:(k_u+1)))
+```
+
+#### Darstellung Inverse DFT Koeffizienten
+```{r}
+# https://stackoverflow.com/questions/41435777/perform-fourier-analysis-to-a-time-series-in-r
+
+ff = function(x = NULL, n = NULL, up = 10L, plot = TRUE, add = FALSE, main = NULL, ...){
+  #The direct transformation
+  #The first frequency is DC, the rest are duplicated
+  dff = fft(x)
+  #The time
+  t = seq(from = 1, to = length(x))
+  #Upsampled time
+  nt = seq(from = 1, to = length(x)+1-1/up, by = 1/up)
+  #New spectrum
+  ndff = array(data = 0, dim = c(length(nt), 1L))
+  ndff[1] = dff[1] #Always, it's the DC component
+  if(n != 0){
+    ndff[2:(n+1)] = dff[2:(n+1)] #The positive frequencies always come first
+    #The negative ones are trickier
+    ndff[length(ndff):(length(ndff) - n + 1)] = dff[length(x):(length(x) - n + 1)]
+  }
+  #The inverses
+  indff = fft(ndff/73, inverse = TRUE)
+  idff = fft(dff/73, inverse = TRUE)
+  if(plot){
+    if(!add){
+      plot(x = t, y = x, pch = 16L, xlab = "Time", ylab = "Measurement")
+      lines(y = Mod(idff), x = t, col = adjustcolor(1L, alpha = 0.5))
+    }
+    lines(y = Mod(indff), x = nt, ...)
+  }
+  ret = data.frame(time = nt, y = Mod(indff))
+  return(ret)
+}
+
+ff(um_mon_1001656403_t, n =45)
+ff(um$Umsatz[um$StoreID == '1001656656'], n =2000)
+```
+#### Datensatz Cluster 
+```{r}
+# d1 <- dft_mon %>% filter(StoreID == '1001656403') %>% mutate(feat_list = c(1:30)) %>% spread(feat_list, DFT)
+# d2 <- dft_mon %>% filter(StoreID == '1100009299') %>% mutate(feat_list = c(1:30)) %>% spread(feat_list, DFT) 
+
+# using TSDist to calculate the Euclidean distance of Discrete FFT directly
+# prepare dataset
+dftd_mon  <- Monatsumsatz_Standort_df %>% 
+  group_by(StoreID) %>% 
+  arrange(Monat_Jahr) %>% 
+  mutate(feat_list = seq(1,96)) %>% 
+  dplyr::select(StoreID, Monatsumsatz_Standort, feat_list) %>% 
+  spread(feat_list, Monatsumsatz_Standort) %>% 
+  column_to_rownames(var = 'StoreID')
+dftd_mon <- as.matrix(dftd_mon)
+colnames(dftd_mon) <- NULL
+
+# TSDatabaseDistances with "fourier" calculates euclidean distance on first n fourier coefficients
+dftd_mon_30_d <- TSdist::TSDatabaseDistances(dftd_mon,distance = "fourier", n =30)
+# calculates euclidean distance for DFT coefficients
+
+dftd_mon_48_d <- TSdist::TSDatabaseDistances(dftd_mon,distance = "fourier", n =48)
+
+dft_mon_final <- dft_mon %>% 
+  group_by(StoreID) %>% 
+  mutate(feat_list = c(1:k)) %>% # k Anzahl Fourier Koeff
+  spread( feat_list, DFT) %>% 
+  mutate_all(., funs(Re, Im)) 
+dft_mon_final <- dft_mon_final[,-c(2:21)]
+
+dft_mon_final_c <- dft_mon_c %>% 
+  group_by(StoreID) %>% # k Anzahl Fourier Koeff
+  mutate(feat_list = c(1:(k+1))) %>% 
+  spread( feat_list, DFT) %>% 
+  mutate_all(., funs(Re, Im)) 
+
+dft_mon_final_c <- dft_mon_final_c[,-c(2:22)]
+ 
+# function(x) {
+  #for (i in seq(length(x))) {
+   # for (j in seq(length(x))){
+    #  if (i +1 > nrow(x)) stop()
+     # ed <- sqrt((Re(x[[i,j]])-Re(x[[i+1,j]]))^2 + (Im(x[[i,j]])-Im(x[[i+1,j]]))^2)
+      # I need to include sapply here for Re and Im so that I get vectors for both and always deduct the vectors from one another 
+      # nested loop muss ich so machen, dass immer 1. /2. reihe, 1. 3. reihe usw..
+      # dann 2.3 usw. 
+      # print(ed)
+   # }
+  #}
+#}
+
+dista(d1_1_2)
+dist
+# test data sets to see if distance is calculated correctly 
+
+d1_1 <- d[1,1]
+d1_2 <- d[2,1]
+d1_1_2 <- rbind(d1_1, d1_2)
+```
+
+### Hierarchical clustering 
+* adv.: 
+  + does not require for k to be set in advance 
+  + can be used in conjunction with fourier distance in R (unlike kmeans)
+* the last adv. is also a disadv. because hierarchical clustering requires the distance matrix to be calculated of all observation/timeseries --> computationally expensive
+  + another disadv: lack of flexibility --> agglomerative procedure 
+* find optimal number of clusters with support of indices that measure within-cluster homogeneity resp. inter-cluster heterogeneity
+* both, C-index and Silhouette are global indices
+* C-index is based on distances between all observations within one cluster
+* Silhouette is based on compactness and separation of clusters; silhouette close to 1 indicates that observation is assigned to the appropriate cluster 
+
+#### Ward's method 
+* ANOVA based approach based on Ward's criterion
+* distance between two clusters is defined as the increase in sum of squared errors (SSE) from merging the two clusters
+* SSE is distance for each observation to group mean (https://hlab.stanford.edu/brian/error_sum_of_squares.html)
+```{r}
+# dftd_mon_30_d
+NbClust(diss = dftd_mon_30_d, distance = NULL, method = "ward.D2",index= "cindex")#min value of index
+# 3 clusters, low index of 0.13
+NbClust(diss = dftd_mon_30_d, distance = NULL, method = "ward.D2",index= "silhouette") # max value of index
+# 2 clusters, 0.4617
+NbClust(diss = dftd_mon_30_d, distance = NULL, method = "ward.D2",index= "mcclain")#min value of index
+#2 cluster, 0.2583
+
+# dftd_mon_48_d
+NbClust(diss = dftd_mon_48_d, distance = NULL, method = "ward.D2",index= "cindex")#min value of index
+# 5 clusters, low index of 0.1217
+NbClust(diss = dftd_mon_48_d, distance = NULL, method = "ward.D2",index= "silhouette") # max value of index
+# 3 clusters, 0.4339
+NbClust(diss = dftd_mon_48_d, distance = NULL, method = "ward.D2",index= "mcclain")#min value of index
+#2 cluster, 0.4897
+```
+```{r}
+# cluster solutions
+ward_cl_30 <- hclust(dftd_mon_30_d, method = "ward.D2")
+ward_cl_48 <- hclust(dftd_mon_48_d, method = "ward.D2")
+```
+
+#### Complete linkage
+* distance between merged cluster cj and cluster ck is defined as the maximum distance between observations in both clusters    
+* it is therefore less influenced by noise and outliers 
+```{r}
+NbClust(diss = dftd_mon_30_d, distance = NULL, method = "complete",index= "cindex")
+# 3 clusters, higher index (worse) of 0.2322
+NbClust(diss = dftd_mon_30_d, distance = NULL, method = "complete",index= "silhouette")
+# 2 clusters; higher silhouette (0.5686)
+NbClust(diss = dftd_mon_30_d, distance = NULL, method = "complete",index= "mcclain")#2 cluster; lower index (0.054)
+
+# dftd_mon_48_d
+NbClust(diss = dftd_mon_48_d, distance = NULL, method = "complete",index= "cindex")# min value of index
+# 2 clusters, low index of 0.151
+NbClust(diss = dftd_mon_48_d, distance = NULL, method = "complete",index= "silhouette") # max value of index
+# 3 clusters, 0.46
+NbClust(diss = dftd_mon_48_d, distance = NULL, method = "complete",index= "mcclain")#min value of index
+#3 cluster, 0.47
+```
+* improvement in c-index from 30 to 48 features
+* decrease in silhouette (due to higher number of clusters)
+* according to C-index Ward improves better on 48 features
+
+```{r}
+compl_cl_30 <- hclust(dftd_mon_30_d, method = "complete")
+compl_cl_48 <- hclust(dftd_mon_48_d, method = "complete")
+```
+
+#### Visualize and compare cluster solutions
+##### Complete solution
+```{r}
+plot(compl_cl_30  ,main="hc complete",xlab="",sub="",cex=0.8)
+plot(compl_cl_48  ,main="hc complete",xlab="",sub="",cex=0.8)
+```
+```{r}
+fviz_dend(compl_cl_30,k = 3, rect = TRUE, cex = 0.5, main ="hc complete_30 K = 3",
+          k_colors = c("#00AFBB","#2E9FDF", "#E7B800", "#FC4E07", "#006633", "#CC0000"))
+fviz_dend(compl_cl_30,k = 4, rect = TRUE, cex = 0.5, main ="hc complete_30 K = 4",
+          k_colors = c("#00AFBB","#2E9FDF", "#E7B800", "#FC4E07", "#006633", "#CC0000"))
+```
+```{r}
+fviz_dend(compl_cl_48,k = 2, rect = TRUE, cex = 0.5, main ="hc complete_48 K = 2",
+          k_colors = c("#00AFBB","#2E9FDF", "#E7B800", "#FC4E07", "#006633", "#CC0000"))
+fviz_dend(compl_cl_48,k = 3, rect = TRUE, cex = 0.5, main ="hc complete_48 K = 3",
+          k_colors = c("#00AFBB","#2E9FDF", "#E7B800", "#FC4E07", "#006633", "#CC0000"))
+fviz_dend(compl_cl_48,k = 4, rect = TRUE, cex = 0.5, main ="hc complete_48 K = 3",
+          k_colors = c("#00AFBB","#2E9FDF", "#E7B800", "#FC4E07", "#006633", "#CC0000"))
+```
+
+#### Ward's solution
+```{r}
+plot(ward_cl_30  ,main="hc ward",xlab="",sub="",cex=0.8)
+plot(ward_cl_48  ,main="hc ward",xlab="",sub="",cex=0.8)
+```
+```{r}
+fviz_dend(ward_cl_30,k = 3, rect = TRUE, cex = 0.5, main ="hc ward_30 K = 3",
+          k_colors = c("#00AFBB","#2E9FDF", "#E7B800", "#FC4E07", "#006633", "#CC0000"))
+fviz_dend(ward_cl_30,k = 4, rect = TRUE, cex = 0.5, main ="hc ward_30 K = 4",
+          k_colors = c("#00AFBB","#2E9FDF", "#E7B800", "#FC4E07", "#006633", "#CC0000"))
+```
+```{r}
+fviz_dend(ward_cl_48,k = 5, rect = TRUE, cex = 0.5, main ="hc ward_48 K = 5",
+          k_colors = c("#00AFBB","#2E9FDF", "#E7B800", "#FC4E07", "#006633", "#CC0000"))
+```
+
+* on a first glance, Ward seems to be better solution: cluster solutions more differentiated 
+
+### Plot revenue streams according to cluster solutions
+#### Append cluster solutions to datasets 
+* lets look at Ward's for 48 features and 5 clusters first, as it performed best 
+```{r}
+view(ward_cl_48_5 <- as.data.frame(cutree(ward_cl_48, k =5)))
+ward_cl_48_5 <- ward_cl_48_5 %>% rownames_to_column() 
+colnames(ward_cl_48_5) <- c('StoreID', 'Cluster_W_5_48')
+view(ward_cl_48_5)
+# merge with total dataset
+
+um_fs <- merge(um_fs, ward_cl_48_5, by = 'StoreID', all.x = T)
+view(um_mon_st <- Monatsumsatz_Standort_df)
+view(um_mon_st <- merge(um_mon_st, ward_cl_48_5, by = 'StoreID', all.x = T))
+```
+
+```{r}
+p_cluster <- um_mon_st %>% 
+  group_by(Cluster_W_5_48, Monat_Jahr) %>% 
+  mutate(Cluster_W_5_48_mean = mean(Monatsumsatz_Standort)) %>% 
+  ungroup() %>% 
+  arrange(Monat_Jahr) %>% 
+  ggplot()+
+  facet_wrap(~Cluster_W_5_48, ncol = 2)+
+  geom_line(aes(x = Monat_Jahr, y= Monatsumsatz_Standort, group = StoreID), color = "grey10") + 
+  geom_line(aes(x = Monat_Jahr, y = Cluster_W_5_48_mean, group = 1), color = "firebrick", alpha = 0.8, size = 1.2)+
+  geom_smooth(aes(x = Monat_Jahr, y = Cluster_W_5_48_mean, group =1), color ="blue", method = lm)+
+  theme_light() +
+  theme(axis.text.x = element_text(angle = 90, size =8))
+ggplotly(p_cluster)
+
+```
+### Umsatzstats /include smarter functions; 
+#### Regression
+```{r}
+um_mon_st_stats <- um_mon_st[, -c(6:7)] %>% 
+  group_by(Cluster_W_5_48, Monat_Jahr) %>% 
+  mutate(Cluster_W_5_48_mean = mean(Monatsumsatz_Standort)) 
+
+# include seasonal dummies and time trend 
+um_mon_st_reg <- um_mon_st_stats %>% ungroup() %>% dplyr::select(Cluster_W_5_48, Cluster_W_5_48_mean, Monat_Jahr, Monat) 
+
+## subset the df on clusters for regression
+um_mon_st_reg_1 <- um_mon_st_reg %>% filter(Cluster_W_5_48 ==1) %>% dplyr::select(Cluster_W_5_48_mean, Monat_Jahr, Monat) %>% distinct() %>% arrange(Monat_Jahr) %>%  mutate(timetrend = seq_along(Monat_Jahr)) %>% dplyr::select(-Monat_Jahr)
+um_mon_st_reg_1$Monat <- as.factor(um_mon_st_reg_1$Monat)
+um_mon_st_reg_1 <- as.data.frame(model.matrix(~ ., data = um_mon_st_reg_1)[,-1])
+
+um_mon_st_reg_2 <- um_mon_st_reg %>% filter(Cluster_W_5_48 ==2) %>% dplyr::select(Cluster_W_5_48_mean, Monat_Jahr, Monat) %>% distinct() %>% arrange(Monat_Jahr) %>% mutate(timetrend = seq_along(Monat_Jahr)) %>% dplyr::select(-Monat_Jahr)
+um_mon_st_reg_2$Monat <- as.factor(um_mon_st_reg_2$Monat)
+um_mon_st_reg_2 <- as.data.frame(model.matrix(~ ., data = um_mon_st_reg_2)[,-1])
+
+um_mon_st_reg_3 <- um_mon_st_reg %>% filter(Cluster_W_5_48 ==3) %>% dplyr::select(Cluster_W_5_48_mean, Monat_Jahr, Monat) %>% distinct() %>% arrange(Monat_Jahr) %>% mutate(timetrend = seq_along(Monat_Jahr)) %>% dplyr::select(-Monat_Jahr)
+um_mon_st_reg_3$Monat <- as.factor(um_mon_st_reg_3$Monat)
+um_mon_st_reg_3 <- as.data.frame(model.matrix(~ ., data = um_mon_st_reg_3)[,-1])
+
+um_mon_st_reg_4 <- um_mon_st_reg %>% filter(Cluster_W_5_48 ==4) %>% dplyr::select(Cluster_W_5_48_mean, Monat_Jahr, Monat) %>% distinct() %>% arrange(Monat_Jahr) %>% mutate(timetrend = seq_along(Monat_Jahr)) %>% dplyr::select(-Monat_Jahr)
+um_mon_st_reg_4$Monat <- as.factor(um_mon_st_reg_4$Monat)
+um_mon_st_reg_4 <- as.data.frame(model.matrix(~ ., data = um_mon_st_reg_4)[,-1])
+
+um_mon_st_reg_5 <- um_mon_st_reg %>% filter(Cluster_W_5_48 ==5) %>% dplyr::select(Cluster_W_5_48_mean, Monat_Jahr, Monat) %>% distinct() %>% arrange(Monat_Jahr) %>% mutate(timetrend = seq_along(Monat_Jahr)) %>% dplyr::select(-Monat_Jahr)
+um_mon_st_reg_5$Monat <- as.factor(um_mon_st_reg_5$Monat)
+um_mon_st_reg_5 <- as.data.frame(model.matrix(~ ., data = um_mon_st_reg_5)[,-1])
+```
+
+```{r}
+res_reg_1 <- lm(Cluster_W_5_48_mean ~., data = um_mon_st_reg_1)
+res_reg_2 <- lm(Cluster_W_5_48_mean ~., data = um_mon_st_reg_2)
+res_reg_3 <- lm(Cluster_W_5_48_mean ~., data = um_mon_st_reg_3)
+res_reg_4 <- lm(Cluster_W_5_48_mean ~., data = um_mon_st_reg_4)
+res_reg_5 <- lm(Cluster_W_5_48_mean ~., data = um_mon_st_reg_5)
+
+summary(res_reg_1)
+summary(res_reg_2)
+summary(res_reg_3)
+summary(res_reg_4)
+summary(res_reg_5)
+```
+#### Anzahl Baumärkte
+```{r}
+um_mon_st %>% dplyr::select(StoreID,Cluster_W_5_48) %>% group_by(Cluster_W_5_48) %>% distinct() %>%  summarize(n())
+```
+
+#### Mittlere Wachstumsrate (Geometrisches Mittel-1)
+```{r}
+view(um_mon_st %>% 
+       dplyr::select(StoreID, Jahr, Monatsumsatz_Standort, Cluster_W_5_48) %>% 
+       group_by(StoreID, Jahr) %>% 
+       mutate(Jahresumsatz_Standort = sum(Monatsumsatz_Standort)) %>% 
+       ungroup() %>% 
+       dplyr::select(StoreID, Jahr, Jahresumsatz_Standort, Cluster_W_5_48) %>% 
+       distinct() %>% 
+       filter(Jahr %in% c(2012,2019)) %>% 
+       group_by(Cluster_W_5_48, StoreID) %>% 
+       mutate(dividend = Jahresumsatz_Standort/lag(Jahresumsatz_Standort,n=1), mitt_Wachstumsrate = dividend^(1/8)-1) %>% 
+       dplyr::select(StoreID, Cluster_W_5_48, mitt_Wachstumsrate) %>%
+       na.omit() %>% 
+       group_by(Cluster_W_5_48) %>% 
+       mutate(min_mitt_Wachstumsrate = min(mitt_Wachstumsrate), max_mitt_Wachstumsrate = max(mitt_Wachstumsrate), mean_pct = mean(mitt_Wachstumsrate)*100) %>% 
+       dplyr::select(Cluster_W_5_48, min_mitt_Wachstumsrate, max_mitt_Wachstumsrate, mean_pct) %>% 
+       distinct())
+
+view(um_mon_st %>% 
+       dplyr::select(StoreID, Jahr, Monatsumsatz_Standort, Cluster_W_5_48) %>% 
+       group_by(Cluster_W_5_48, Jahr) %>% 
+       mutate(Jahresumsatz_Cluster = mean(Monatsumsatz_Standort)) %>% 
+       ungroup() %>% 
+       dplyr::select(Jahr, Jahresumsatz_Cluster, Cluster_W_5_48) %>% 
+       distinct() %>% 
+       filter(Jahr %in% c(2012,2019)) %>% 
+       group_by(Cluster_W_5_48) %>% 
+       mutate(dividend = Jahresumsatz_Cluster/lag(Jahresumsatz_Cluster,n=1), mitt_Wachstumsrate = dividend^(1/8)-1) %>% 
+       dplyr::select(Cluster_W_5_48, mitt_Wachstumsrate) %>% 
+       na.omit() %>% 
+       mutate(min_mitt_Wachstumsrate = min(mitt_Wachstumsrate), max_mitt_Wachstumsrate = max(mitt_Wachstumsrate), mean_pct = mean(mitt_Wachstumsrate)*100) %>% 
+       dplyr::select(Cluster_W_5_48, min_mitt_Wachstumsrate, max_mitt_Wachstumsrate, mean_pct) %>% 
+       distinct())
+```
+
+#### Tagesumsätze
+```{r}
+view(um_fs %>% filter(year(Datum) == '2019') %>% 
+       mutate(Wochentag = wday(Datum)) %>% 
+       dplyr:: select(StoreID, Datum, Wochentag, Umsatz, Cluster_W_5_48) %>% 
+       arrange(Datum) %>% 
+       group_by(StoreID) %>% 
+       mutate(mean_umsatz = mean(Umsatz)) %>% 
+       ungroup() %>% 
+       group_by(StoreID, Wochentag) %>% 
+       mutate(mean_umsatz_wochentag = mean(Umsatz)) %>% 
+       dplyr::select(StoreID, Cluster_W_5_48, mean_umsatz, mean_umsatz_wochentag) %>% 
+       distinct() %>% 
+       filter(Wochentag == 7) %>% 
+       group_by(Cluster_W_5_48) %>% 
+       summarize (mean_mean_umsatz = mean(mean_umsatz), mean_mean_umsatz_wochentag = mean(mean_umsatz_wochentag)) 
+       )  
+        
+```
+
+### Useful info
+```{r}
+# Store IDs
+storeids <- um %>% select(StoreID) %>% distinct()
+```
+
+### Multinomial Logit Modell
+```{r}
+lapply(fs[,-1], table)
+# exclude variables with 0 variance
+um_fs_logit <- um_fs[,-which(colnames(um_fs) %in% c('Greenbuilding', "BackBistro", "Autowaschanlage","Bootszubehoer", "Service_Bargeldauszahlung", "Service_Einladen", "Service_Farbmisch", "Service_Kunden", "Service_NullProzentFinanz", "Service_Vorteilskarte", "Service_Werkstatt", "Service_Bilderrahmen", "Service_BauFach", "Umsatz", "Datum"))]
+```
+
+```{r}
+um_fs_logit <- um_fs_logit %>%  
+  dplyr::distinct() %>%
+  mutate(region_dummy = ifelse(Region == 'Süd / Ost', 1, 0))  
+um_fs_logit <- um_fs_logit[,-c(1:2)]
+
+um_fs_logit$Cluster_W_5_48 <- as.numeric(um_fs_logit$Cluster_W_5_48)
+um_fs_logit$VerkaufsflaecheQM <- as.numeric(um_fs_logit$VerkaufsflaecheQM)
+um_fs_logit <- as.data.frame(model.matrix(~ ., data = um_fs_logit))[,-1]
+```
+
+```{r}
+DataExplorer::plot_histogram(um_fs_logit)
+```
+```{r}
+DataExplorer::plot_bar(um_fs_logit)
+```
+```{r}
+um_fs_logit$Cluster_W_5_48 <- as.factor(um_fs_logit$Cluster_W_5_48)
+res_multil <- multinom(Cluster_W_5_48~.+KaufkraftIndex*Service_Mietgeraete, data = um_fs_logit)
+summary(res_multil)
+```
+```{r}
+install.packages('AER')
+library(AER)
+coeftest(res_multil)
+```
+
+#### Deskriptive Stats
+```{r}
+um_fs_logit %>% group_by(Cluster_W_5_48) %>% summarize_all(funs(summe_anzahl = sum(., na.rm =T),mean = mean(.,na.rm=TRUE), var_koeff = sd(., na.rm = T)/mean(., na.rm = T)))
+```
+```{r}
+cluster_stats <- um_fs_logit %>% group_by(Cluster_W_5_48) %>% summarize(Durchs_Kaufpreisindex = sd(KaufkraftIndex), Durchs_Einwohnerdichte = sd(Einwohnerdichte), Durchs_Verkaufsflaech = sd(VerkaufsflaecheQM), Pct_Region = mean(region_dummy), Pct_BoschShop_Gruen = mean(BoschShopGruen), Pct_BoschShop_Blau = mean(BoschShopBlau),Pct_Heimtierabteilung =mean(Heimtierabteilung), Pct_Service_AnhaengerVerleih = mean(Service_Anhaengerverleih), Pct_Service_Gasflasche = mean(Service_Gasflasche), Pct_Service_Mietgeraete = mean(Service_Mietgeraete), Pct_Service_Langer_Freitag = mean(Service_LangerFreitag), Pct_Service3DDruck = mean(Service_3DDruck),Pct_BayWa_EWettb = mean(ErsterWettbewerberBayWa), Pct_Hornbach_EWettb = mean(ErsterWettbewerberHornbach),Pct_Obi_EWettb = mean(ErsterWettbewerberOBI), Pct_Umbau_Konzept16 = mean(UmbaukonzeptUm16), Pct_Umbau_Konzept17 = mean(UmbaukonzeptUm17), Pct_Umbau_Konzept18 = mean(UmbaukonzeptUm18), Pct_Wohnberatung = mean(Service_Wohnberatung))
+```
+
+
+
+### OUT KNN clustering mit Fourier Deskriptoren
+* die euklidische Distanz zwischen zwei Fourier Transforms, stellt die untere Schranke der euklidischen Distanz der Originaldaten dar
+* To DO: DFT mit anderem Paket bestimmen, hclust Ward's method, intepretation
+```{r}
+dist(dft_mon_final, method = 'euclidean')
+set.seed(1234)
+k <- 2:10
+# determine optimal number of clusters with silhoutte index
+fviz_nbclust(dft_mon_final, kmeans, method = "silhouette") # 2 or 3
+
+# dft_mon_final
+k3 <- kmeans(dft_mon_final, 3, nstart=25)
+k5 <- kmeans(dft_mon_final, 5, nstart=25)
+k6 <- kmeans(dft_mon_final, 6, nstart=25)
+k10 <- kmeans(dft_mon_final, 10, nstart=25)
+
+fviz_cluster(k3, geom = "point", data = dft_mon_final) + ggtitle("k = 3")
+fviz_cluster(k5, geom = "point", data = dft_mon_final) + ggtitle("k = 5")
+fviz_cluster(p_k3, geom = "point", data = dft_mon_final) 
+
+library(gridExtra)
+grid.arrange(p_k4, p_k5, p_k6, nrow = 2)
+```
+```{r}
+fviz_nbclust(dft_mon_final_c, kmeans, method = "silhouette") # 3 or 4 (0.7)
+```
+```{r}
+k3_c <- kmeans(dft_mon_final_c, 3, nstart=25)
+k4_c <- kmeans(dft_mon_final_c, 4, nstart=25)
+```
+
+```{r}
+
+
+### Append clusters to fs
+```{r}
+fs2 <- fs
+fs2$kmcl <- k3$cluster
+fs2 %>% filter(kmcl ==2)
+```
+```{r}
+fs2_c <- fs
+fs2_c$kmcl <- k4_c$cluster
+
+# append to Monatsumsatz
+Monatsumsatz_Standort_df2 <- merge(Monatsumsatz_Standort_df,fs2_c,by = 'StoreID', all.x =TRUE)
+
+# plot time series over one another!
+Monatsumsatz_Standort_df2 %>% filter(kmcl == 4) %>% arrange(Monat_Jahr) 
+
+```
+
+
+## Quartalsumsätze
+```{r}
+# Quartalumsatz:
+Quartalsumsatz1<- um %>% mutate(Quartal_Jahr = factor(quarter(Datum,with_year = TRUE))) %>% dplyr::group_by(Quartal_Jahr) %>% summarize(Quartalsumsatz =sum(Umsatz))
+
+Quartalsumsatz_p1 <- Quartalsumsatz1 %>% 
+  mutate(Jahr = substr(Quartalsumsatz1$Quartal_Jahr,1,4))%>% 
+  arrange(Quartal_Jahr) %>% 
+  ggplot() +
+  geom_histogram(aes(x = Quartal_Jahr, y =Quartalsumsatz, group = 1, fill = Jahr), stat = 'identity') + 
+  scale_fill_brewer(palette = "RdYlBu", direction =1)+
+  theme_light() +
+  facet_grid(cols = vars(Jahr), scales = "free_x") +
+  theme(axis.text.x = element_text(angle = 90, size =12), axis.text.y = element_text(size =12))
+Quartalsumsatz_p1
+ggplotly(Quartalsumsatz_p1)
+
+# test
+Quartalsumsatz1 %>% summarize(summe = sum(Quartalsumsatz1)) #663079.9748	
+```
+
+```{r}
+# Interjahresvergleich der Quartele 
+Quartalsumsatz2<- um %>% mutate(Quartal_Jahr = paste(quarter(Datum), year(Datum))) %>% dplyr::group_by(Quartal_Jahr) %>% summarize(Quartalsumsatz =sum(Umsatz)) 
+
+Quartalsumsatz_p2 <- Quartalsumsatz2 %>% 
+  mutate(Quartal = str_extract(Quartal_Jahr, "^.{1}")) %>% 
+  group_by(Quartal_Jahr) %>% 
+  ggplot() +
+  geom_histogram(aes(x = Quartal_Jahr, y =Quartalsumsatz, group = 1, fill = Quartal), stat = 'identity') + 
+  scale_fill_brewer(palette = "RdYlBu", direction =1)+
+  theme_light() +
+  facet_grid(cols = vars(Quartal), scales = "free_x") +
+  theme(axis.text.x = element_text(angle = 90, size =12), axis.text.y = element_text(size =12))
+ggplotly(Quartalsumsatz_p)
+```
+* auch hier insgesamt Aufwärtstrend erkennbar
+* sträkster stärkster Umsatz und Aufwärtstrend im zweiten Quartal
+* stetigkeit im dritten Quartal 
+
+## Jahresumsätze
+```{r}
+# Jahresumsatz 
+Jahresumsatz <- um %>% mutate(Jahr = factor(year(Datum))) %>% group_by(Jahr) %>% summarize(Jahresumsatz =sum(Umsatz)) %>% ungroup()
+
+# test 
+Jahresumsatz %>% summarise(summe = sum(Jahresumsatz)) #663079.9748	
+
+Jahresumsatz %>% 
+  mutate(highlight = ifelse(Jahr == 2019, "yes", "no")) %>% 
+  ggplot(aes(x = Jahr, y =Jahresumsatz, fill = highlight)) + 
+  geom_col() + 
+  coord_flip() + 
+  scale_fill_manual(values = c("yes" = "firebrick", "no" = "gray48"), guide = FALSE) + 
+ # geom_label(aes(label = comma(round(Jahresumsatz,0))), color = "white", fontface = "bold", hjust =1.5, size = 4)+ 
+  theme_light() + 
+  theme(axis.title = element_blank(), axis.text.x = element_text(size =12), axis.text.y = element_text(size =12)) 
+```
+
+## !Umsatzentwicklung Stats per Standort
+### Unterjährige Umsatzentwicklung
+```{r}
+# für Monat und Quartal include KPI, die die Schwankungen im Jahr pro Store wiederspiegelt (Zeittrend)
+
+Monatsumsatz_Standort_df <- um %>% 
+  mutate(Monat = month(Datum), Jahr= year(Datum), Monat_Jahr = format(Datum,"%Y-%m")) %>%
+  group_by_at(vars(StoreID, Monat_Jahr)) %>% 
+  mutate(Monatsumsatz_Standort = sum(Umsatz)) %>% 
+  ungroup() %>% 
+  dplyr::select(-c(Datum, Umsatz, Monat_Jahr)) %>% 
+  distinct() %>% 
+  group_by(StoreID, Monat) %>% 
+  mutate(YOY_Monat = Monatsumsatz_Standort - dplyr::lag(Monatsumsatz_Standort, n = 1), 
+         # müsste Zeittrend entsprechen
+         YOY_Monat_pct = (Monatsumsatz_Standort/dplyr::lag(Monatsumsatz_Standort, n = 1)-1)* 100 
+         # trend
+         ) %>% 
+  ungroup()
+```
+```{r}
+Quartalsumsatz1<- um %>% mutate(Quartal_Jahr = factor(quarter(Datum,with_year = TRUE))) %>% dplyr::group_by(Quartal_Jahr) %>% summarize(Quartalsumsatz =sum(Umsatz))
+
+Quartalsumsatz_Standort <- um %>% 
+  mutate(Quartal = quarter(Datum),Jahr=year(Datum), Quartal_Jahr = factor(quarter(Datum,with_year = TRUE))) %>%
+  group_by_at(vars(StoreID, Quartal_Jahr)) %>% 
+  mutate(Quartalsumsatz_Standort = sum(Umsatz)) %>%  
+  ungroup() %>% 
+  dplyr::select(-c(Datum, Umsatz)) %>% 
+  distinct() %>% 
+  group_by(StoreID, Quartal)%>% 
+  mutate(YOY_Quartal = Quartalsumsatz_Standort - dplyr::lag(Quartalsumsatz_Standort, n = 1),
+         # müsste Zeittrend entsprechen
+         YOY_Quartal_pct = (Quartalsumsatz_Standort/dplyr::lag(Quartalsumsatz_Standort, n = 1)-1)*100
+         ) # trend
+#6848 rows is correct 
+
+Quartalsumsatz_Standort %>% 
+  mutate(store_id = factor(StoreID)) %>% 
+  arrange(Quartal_Jahr) %>% 
+  ggplot(aes(x = Quartal_Jahr, y =Quartalsumsatz_Standort, color = store_id)) +
+  geom_line(aes(group= "StoreID")) # works but tells you nothing 
+```
+```{r}
+# Jahresübergreifende Umsatzentwicklung 
+# include: Umsatzwachstum insgesamt pro Standort, KPI, die auf einen kontinuierlichen/diskontinuierlichen Wachstum schließen lässt (ggf. Varianz der YOY_Jahr_pct),
+
+Jahresumsatz_Standort <- um %>% 
+  mutate(Jahr=year(Datum)) %>%
+  group_by_at(vars(StoreID, Jahr)) %>% 
+  mutate(Jahresumsatz_Standort = sum(Umsatz)) %>%  
+  ungroup() %>% 
+  dplyr::select(-c(Datum, Umsatz)) %>% distinct() %>% 
+  group_by(StoreID)%>% 
+  mutate(YOY_Jahr_norm = Jahresumsatz_Standort - dplyr::lag(Jahresumsatz_Standort, n = 1), 
+         # Zeittrend
+         YOY_Jahr_pct = (Jahresumsatz_Standort/lag(Jahresumsatz_Standort, n = 1)-1)*100 # trend
+         )
+
+Stats_um_Jahr_Standort <- Jahresumsatz_Standort %>% group_by(StoreID) %>% mutate_at(vars("Jahresumsatz_Standort", "YOY_Jahr", "YOY_pct_Jahr"), funs(min(.,na.rm =TRUE), max(.,na.rm=TRUE), mean = mean(.,na.rm=TRUE), median = median(.,na.rm=TRUE), var = var(.,na.rm=TRUE), sd = sd(.,na.rm=TRUE))) %>% dplyr::select(-c(2:5)) %>% distinct() 
+
+Stats_um_Jahr_Standort %>% arrange(desc(YOY_pct_Jahr_mean)) %>% top_n(50)
+```
+
+## FS-Daten
+### Region, Standort, KI, Potential 
+
+## Summary EDA findings
+* 214 stores insgesamt in Filialstammdaten
+* Kategorisierung Filialstammdaten:     
+  + Wettbewerbsinfo: Erster Wettbewerber
+  + Standortinformationen & Charakterisierung des Marktes: Region, Verkaufsfläche, Binäre Variablen + Anzahl Vermietung, Umbaukonzept
+  +  Mikroökonomische Infos: Einwohnerdichte, Kaufkraftindex, Potenzial per Einwohner
+* 12 of the binary variables have 0 variance 
+
+
+### GAM regression
+```{r}
+
+```
+
+```{r}
+table(fs$Region)
+table(fs$ErsterWettbewerber)
+```
+
+
+
+```{r}
+mean(fs$VerkaufsflaecheQM)
+```
+
+
+
+
+
+
+
+
+
+
